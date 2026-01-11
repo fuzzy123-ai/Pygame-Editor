@@ -2,9 +2,9 @@
 Scene Canvas - 2D Canvas für Objekte mit Drag & Drop, Zoom, Game Preview
 """
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QHBoxLayout, 
-                                QPushButton, QSlider, QComboBox)
+                                QPushButton, QSlider, QComboBox, QMenu)
 from PySide6.QtCore import Qt, Signal, QPoint, QRect, QTimer
-from PySide6.QtGui import QPainter, QPaintEvent, QColor, QPen, QBrush, QPixmap, QImage, QWheelEvent
+from PySide6.QtGui import QPainter, QPaintEvent, QColor, QPen, QBrush, QPixmap, QImage, QWheelEvent, QContextMenuEvent
 from pathlib import Path
 import json
 from typing import Optional, Dict, Any, List
@@ -748,7 +748,7 @@ class SceneCanvas(QWidget):
             "height": obj_size,
             "layer": self.current_layer,  # Layer-Information hinzufügen
             "collider": {
-                "enabled": True,
+                "enabled": False,  # Nicht per default aktiv
                 "type": "rect"
             },
             "ground": False  # Standard: kein Ground
@@ -816,7 +816,7 @@ class SceneCanvas(QWidget):
             "height": obj_size,
             "layer": self.current_layer,
             "collider": {
-                "enabled": True,
+                "enabled": False,  # Nicht per default aktiv
                 "type": "rect"
             },
             "ground": False,  # Standard: kein Ground
@@ -843,6 +843,156 @@ class SceneCanvas(QWidget):
         # Neues Objekt auswählen
         self.selected_object_id = obj_id
         self.object_selected.emit(new_obj)
+    
+    def _calculate_sprite_bounds(self, sprite_path: str) -> tuple[int, int, int, int]:
+        """
+        Berechnet die Bounding Box um die sichtbaren Pixel eines Sprites
+        Gibt zurück: (min_x, min_y, width, height) relativ zum Sprite
+        """
+        if not self.project_path or not sprite_path:
+            return (0, 0, self.grid_size, self.grid_size)
+        
+        try:
+            # Pfad normalisieren
+            sprite_path_obj = Path(sprite_path)
+            if sprite_path_obj.is_absolute():
+                full_path = sprite_path_obj
+            else:
+                full_path = self.project_path / sprite_path
+            
+            if not full_path.exists():
+                print(f"[Canvas] Sprite nicht gefunden: {full_path}")
+                return (0, 0, self.grid_size, self.grid_size)
+            
+            # Sprite laden
+            pixmap = QPixmap(str(full_path))
+            if pixmap.isNull():
+                print(f"[Canvas] Sprite konnte nicht geladen werden: {full_path}")
+                return (0, 0, self.grid_size, self.grid_size)
+            
+            # Original-Größe speichern
+            original_width = pixmap.width()
+            original_height = pixmap.height()
+            
+            # Auf Grid-Größe skalieren falls nötig
+            # Wichtig: Alpha-Kanal beim Skalieren erhalten
+            if original_width != self.grid_size or original_height != self.grid_size:
+                # Sicherstellen dass Alpha-Kanal beim Skalieren erhalten bleibt
+                pixmap = pixmap.scaled(self.grid_size, self.grid_size, 
+                                     Qt.AspectRatioMode.IgnoreAspectRatio,
+                                     Qt.TransformationMode.SmoothTransformation)
+                # Nach Skalierung Alpha-Kanal prüfen und ggf. wiederherstellen
+                if pixmap.hasAlphaChannel() == False:
+                    # Falls Alpha-Kanal verloren ging, aus Original wiederherstellen
+                    temp_image = pixmap.toImage()
+                    temp_image = temp_image.convertToFormat(QImage.Format.Format_ARGB32)
+                    pixmap = QPixmap.fromImage(temp_image)
+            
+            # In QImage konvertieren für Pixel-Zugriff (mit Alpha-Kanal)
+            image = pixmap.toImage()
+            image = image.convertToFormat(QImage.Format.Format_ARGB32)  # Sicherstellen dass Alpha-Kanal vorhanden ist
+            
+            # Bounding Box finden (sichtbare Pixel)
+            min_x = self.grid_size
+            min_y = self.grid_size
+            max_x = -1
+            max_y = -1
+            has_visible_pixels = False
+            
+            # Durch alle Pixel iterieren
+            for y in range(image.height()):
+                for x in range(image.width()):
+                    pixel = image.pixel(x, y)
+                    # Alpha-Kanal mit QColor extrahieren (zuverlässiger als Bit-Shifting)
+                    color = QColor(pixel)
+                    alpha = color.alpha()
+                    
+                    # Nur Pixel mit Alpha > 0 als sichtbar betrachten
+                    if alpha > 0:
+                        has_visible_pixels = True
+                        min_x = min(min_x, x)
+                        min_y = min(min_y, y)
+                        max_x = max(max_x, x)
+                        max_y = max(max_y, y)
+            
+            if not has_visible_pixels:
+                # Keine sichtbaren Pixel - volle Größe verwenden
+                print(f"[Canvas] Keine sichtbaren Pixel gefunden in {sprite_path}")
+                return (0, 0, self.grid_size, self.grid_size)
+            
+            # Bounding Box berechnen
+            width = max_x - min_x + 1
+            height = max_y - min_y + 1
+            
+            print(f"[Canvas] Sprite-Bounds für {sprite_path}: min_x={min_x}, min_y={min_y}, width={width}, height={height}")
+            
+            return (min_x, min_y, width, height)
+        except Exception as e:
+            import traceback
+            print(f"[Canvas] Fehler beim Berechnen der Sprite-Bounds: {e}")
+            traceback.print_exc()
+            return (0, 0, self.grid_size, self.grid_size)
+    
+    def _add_collider(self, obj_id: str):
+        """Fügt eine Kollisionsbox zu einem Objekt hinzu"""
+        for obj in self.objects:
+            if obj.get("id") == obj_id:
+                collider_data = obj.get("collider", {})
+                collider_data["enabled"] = True
+                collider_data["type"] = "rect"
+                
+                # Kollisionsbox um sichtbare Pixel berechnen
+                sprite_path = obj.get("sprite")
+                if sprite_path:
+                    min_x, min_y, width, height = self._calculate_sprite_bounds(sprite_path)
+                    obj_x = obj.get("x", 0)
+                    obj_y = obj.get("y", 0)
+                    
+                    # Absolute Position der Kollisionsbox
+                    collider_data["x"] = obj_x + min_x
+                    collider_data["y"] = obj_y + min_y
+                    collider_data["width"] = width
+                    collider_data["height"] = height
+                else:
+                    # Kein Sprite - volle Objekt-Größe verwenden
+                    collider_data["x"] = obj.get("x", 0)
+                    collider_data["y"] = obj.get("y", 0)
+                    collider_data["width"] = obj.get("width", self.grid_size)
+                    collider_data["height"] = obj.get("height", self.grid_size)
+                
+                obj["collider"] = collider_data
+                self.save_scene()
+                self.canvas.update()
+                break
+    
+    def _remove_collider(self, obj_id: str):
+        """Entfernt die Kollisionsbox von einem Objekt"""
+        for obj in self.objects:
+            if obj.get("id") == obj_id:
+                collider_data = obj.get("collider", {})
+                collider_data["enabled"] = False
+                obj["collider"] = collider_data
+                self.save_scene()
+                self.canvas.update()
+                break
+    
+    def _add_ground(self, obj_id: str):
+        """Fügt Boden-Eigenschaft zu einem Objekt hinzu"""
+        for obj in self.objects:
+            if obj.get("id") == obj_id:
+                obj["ground"] = True
+                self.save_scene()
+                self.canvas.update()
+                break
+    
+    def _remove_ground(self, obj_id: str):
+        """Entfernt Boden-Eigenschaft von einem Objekt"""
+        for obj in self.objects:
+            if obj.get("id") == obj_id:
+                obj["ground"] = False
+                self.save_scene()
+                self.canvas.update()
+                break
 
 
 class CanvasWidget(QWidget):
@@ -873,6 +1023,95 @@ class CanvasWidget(QWidget):
         # Linke Maustaste für Objekt-Auswahl und Drag
         if event.button() == Qt.LeftButton:
             self.mouse_pressed.emit(event.position().toPoint())
+    
+    def contextMenuEvent(self, event: QContextMenuEvent):
+        """Rechtsklick-Menü Event"""
+        # Canvas-Koordinaten in World-Koordinaten umrechnen
+        # QContextMenuEvent verwendet pos() statt position()
+        pos = event.pos()
+        adjusted_pos = pos - self.parent_canvas.view_offset
+        zoom = self.parent_canvas.zoom_factor
+        world_x = int(adjusted_pos.x() / zoom)
+        world_y = int(adjusted_pos.y() / zoom)
+        
+        # Objekt finden das angeklickt wurde
+        clicked_obj = None
+        tolerance = 2
+        
+        # Zuerst aktiven Layer prüfen
+        for obj in reversed(self.parent_canvas.objects):
+            obj_layer = obj.get("layer", "default")
+            if obj_layer != self.parent_canvas.current_layer:
+                continue
+                
+            obj_x = int(obj.get("x", 0))
+            obj_y = int(obj.get("y", 0))
+            obj_width = int(obj.get("width", 32))
+            obj_height = int(obj.get("height", 32))
+            
+            if (obj_x - tolerance <= world_x < obj_x + obj_width + tolerance and
+                obj_y - tolerance <= world_y < obj_y + obj_height + tolerance):
+                clicked_obj = obj
+                break
+        
+        # Falls nicht gefunden, andere Layer prüfen
+        if clicked_obj is None:
+            for obj in reversed(self.parent_canvas.objects):
+                obj_layer = obj.get("layer", "default")
+                if obj_layer == self.parent_canvas.current_layer:
+                    continue
+                    
+                obj_x = int(obj.get("x", 0))
+                obj_y = int(obj.get("y", 0))
+                obj_width = int(obj.get("width", 32))
+                obj_height = int(obj.get("height", 32))
+                
+                if (obj_x - tolerance <= world_x < obj_x + obj_width + tolerance and
+                    obj_y - tolerance <= world_y < obj_y + obj_height + tolerance):
+                    clicked_obj = obj
+                    break
+        
+        if clicked_obj:
+            # Objekt auswählen
+            self.parent_canvas.selected_object_id = clicked_obj.get("id")
+            self.parent_canvas.object_selected.emit(clicked_obj)
+            self.update()
+            
+            # Menü erstellen
+            menu = QMenu(self)
+            
+            # Kollision-Untermenü
+            collider_data = clicked_obj.get("collider", {})
+            collider_enabled = collider_data.get("enabled", False)
+            
+            collision_menu = menu.addMenu("Kollision")
+            if collider_enabled:
+                remove_collision_action = collision_menu.addAction("Kollision entfernen")
+                remove_collision_action.triggered.connect(
+                    lambda: self.parent_canvas._remove_collider(clicked_obj.get("id"))
+                )
+            else:
+                add_collision_action = collision_menu.addAction("Kollision hinzufügen")
+                add_collision_action.triggered.connect(
+                    lambda: self.parent_canvas._add_collider(clicked_obj.get("id"))
+                )
+            
+            # Boden-Untermenü
+            ground_enabled = clicked_obj.get("ground", False)
+            ground_menu = menu.addMenu("Boden")
+            if ground_enabled:
+                remove_ground_action = ground_menu.addAction("Boden entfernen")
+                remove_ground_action.triggered.connect(
+                    lambda: self.parent_canvas._remove_ground(clicked_obj.get("id"))
+                )
+            else:
+                add_ground_action = ground_menu.addAction("Boden hinzufügen")
+                add_ground_action.triggered.connect(
+                    lambda: self.parent_canvas._add_ground(clicked_obj.get("id"))
+                )
+            
+            # Menü anzeigen
+            menu.exec(event.globalPos())
     
     def mouseMoveEvent(self, event):
         """Maus-Bewegung Event"""

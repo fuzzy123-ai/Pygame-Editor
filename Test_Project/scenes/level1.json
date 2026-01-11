@@ -10,16 +10,21 @@
       "id": "object_3",
       "type": "sprite",
       "sprite": "assets/images/066.png",
-      "x": 384,
-      "y": 192,
+      "x": 480,
+      "y": 384,
       "width": 96,
       "height": 96,
       "collider": {
         "enabled": true,
-        "type": "rect"
+        "type": "rect",
+        "x": 480,
+        "y": 384,
+        "width": 96,
+        "height": 96
       },
       "layer": "default",
-      "ground": true
+      "ground": true,
+      "code": "# Code für object_3\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_3\")\n\ndef update():\n    # Deine Logik hier\n    pass\n"
     },
     {
       "id": "object_10",
@@ -125,9 +130,14 @@
       "layer": "default",
       "collider": {
         "enabled": true,
-        "type": "rect"
+        "type": "rect",
+        "x": 384,
+        "y": 96,
+        "width": 96,
+        "height": 96
       },
-      "ground": false
+      "ground": false,
+      "code": "# Code für object_15\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_15\")\n\ndef update():\n    # Deine Logik hier\n    pass\n"
     },
     {
       "id": "object_16",

@@ -17,7 +17,7 @@ from typing import Dict, Optional
 from .scene_canvas import SceneCanvas
 from .asset_browser import AssetBrowser
 from .code_editor import CodeEditor
-from .inspector import Inspector
+# Inspector entfernt - wird durch Rechtsklick-Menü ersetzt
 from .console import Console
 from .sprite_viewer_tab import SpriteViewerTab
 from ..utils.undo_redo import UndoRedoManager
@@ -89,7 +89,7 @@ class EditorMainWindow(QMainWindow):
         self.scene_canvas: SceneCanvas | None = None
         self.asset_browser: AssetBrowser | None = None
         self.code_editor: CodeEditor | None = None
-        self.inspector: Inspector | None = None
+        # Inspector entfernt
         self.console: Console | None = None
         
         # Run/Stop System
@@ -300,23 +300,9 @@ class EditorMainWindow(QMainWindow):
         self.asset_browser.setMinimumWidth(150)  # Mindestbreite damit es sichtbar bleibt
         main_splitter.addWidget(self.asset_browser)
         
-        # Mittlerer Bereich: Scene Canvas (oben) und Inspector (unten)
-        center_splitter = QSplitter(Qt.Vertical)
-        center_splitter.setChildrenCollapsible(False)
-        
-        # Scene Canvas (mehr Platz)
+        # Mittlerer Bereich: Scene Canvas (komplett, kein Inspector mehr)
         self.scene_canvas = SceneCanvas()
-        center_splitter.addWidget(self.scene_canvas)
-        
-        # Inspector (unten, weniger Platz)
-        self.inspector = Inspector()
-        self.inspector.setMinimumWidth(200)
-        self.inspector.setMinimumHeight(150)  # Minimale Höhe für Scrollbar
-        center_splitter.addWidget(self.inspector)
-        center_splitter.setStretchFactor(0, 5)  # Canvas bekommt deutlich mehr Platz
-        center_splitter.setStretchFactor(1, 0)  # Inspector fixe Höhe (nicht streckbar)
-        
-        main_splitter.addWidget(center_splitter)
+        main_splitter.addWidget(self.scene_canvas)
         
         # Rechter Bereich: Code Editor (breiter, mehr Y-Platz)
         self.code_editor = CodeEditor()
@@ -325,14 +311,9 @@ class EditorMainWindow(QMainWindow):
         self.code_editor.run_requested.connect(self._run_game)
         self.code_editor.stop_requested.connect(self._stop_game)
         main_splitter.addWidget(self.code_editor)
-        # Inspector kann kollabiert werden wenn nichts ausgewählt ist
-        inspector_index = main_splitter.indexOf(self.inspector)
-        if inspector_index >= 0:
-            main_splitter.setCollapsible(inspector_index, True)
-        
         # Verhältnisse setzen
         main_splitter.setStretchFactor(0, 0)  # Asset Browser fix
-        main_splitter.setStretchFactor(1, 1)  # Center nimmt restlichen Platz
+        main_splitter.setStretchFactor(1, 1)  # Canvas nimmt restlichen Platz
         main_splitter.setStretchFactor(2, 0)  # Code Editor fix
         
         # Splitter-Änderungen überwachen für visuelle Indikatoren
@@ -367,14 +348,8 @@ class EditorMainWindow(QMainWindow):
         self.current_sprite_tab = None
         
         # Signals verbinden
-        if self.scene_canvas and self.inspector:
-            self.scene_canvas.object_selected.connect(self.inspector.on_object_selected)
+        if self.scene_canvas:
             self.scene_canvas.object_selected.connect(self._on_object_selected_for_code)
-            # Inspector-Änderungen → Canvas aktualisieren
-            self.inspector.sprite_changed.connect(self._on_inspector_sprite_changed)
-            self.inspector.object_changed.connect(self._on_inspector_object_changed)
-            self.inspector.object_deleted.connect(self._on_inspector_object_deleted)
-            self.inspector.object_created.connect(self._on_inspector_object_created)
         
         # Undo/Redo-Manager an Komponenten weitergeben
         if self.scene_canvas:
@@ -383,8 +358,6 @@ class EditorMainWindow(QMainWindow):
         if self.code_editor:
             self.code_editor.set_undo_redo_manager(self.undo_redo_manager)
             self.code_editor.undo_redo_changed.connect(self._update_undo_redo_buttons)
-        if self.inspector:
-            self.inspector.set_scene_canvas(self.scene_canvas)
         
         # Initial Buttons-Status setzen
         self._update_undo_redo_buttons()
@@ -528,8 +501,7 @@ class EditorMainWindow(QMainWindow):
                 self.code_editor.load_project(project_path)
                 # Code-Editor initial auf globale game.py setzen (kein Objekt ausgewählt)
                 self.code_editor.set_object(None, None)
-            if self.inspector:
-                self.inspector.load_project(project_path)
+            # Inspector entfernt
             
             # Undo/Redo-Historie beim Laden eines neuen Projekts löschen
             self.undo_redo_manager.clear()
@@ -564,63 +536,7 @@ class EditorMainWindow(QMainWindow):
         # Für Drag & Drop vorbereiten
         pass
     
-    def _on_inspector_sprite_changed(self):
-        """Wird aufgerufen wenn Sprite im Inspector geändert wurde"""
-        # Canvas aktualisieren und Szene speichern
-        if self.scene_canvas:
-            # Sprite-Cache leeren für das geänderte Objekt
-            if self.scene_canvas.canvas:
-                self.scene_canvas.canvas.sprite_cache.clear()
-            self.scene_canvas.save_scene()
-            self.scene_canvas.canvas.update()
-    
-    def _on_inspector_object_changed(self):
-        """Wird aufgerufen wenn Objekt-Eigenschaften im Inspector geändert wurden"""
-        # Canvas aktualisieren und Szene speichern
-        if self.scene_canvas:
-            self.scene_canvas.save_scene()
-            self.scene_canvas.canvas.update()
-    
-    def _on_inspector_object_deleted(self, obj_id: str):
-        """Wird aufgerufen wenn ein Objekt im Inspector gelöscht werden soll"""
-        if self.scene_canvas:
-            # Objekt finden bevor es gelöscht wird
-            deleted_obj = None
-            for obj in self.scene_canvas.objects:
-                if obj.get("id") == obj_id:
-                    deleted_obj = obj.copy()
-                    break
-            
-            if deleted_obj and self.undo_redo_manager:
-                # Undo/Redo-Command erstellen
-                from ..utils.commands import ObjectDeleteCommand
-                command = ObjectDeleteCommand(
-                    self.scene_canvas.objects,
-                    deleted_obj,
-                    lambda: self.scene_canvas.canvas.update()
-                )
-                self.undo_redo_manager.execute_command(command)
-                self._update_undo_redo_buttons()
-            else:
-                # Fallback ohne Undo/Redo
-                self.scene_canvas.objects = [obj for obj in self.scene_canvas.objects if obj.get("id") != obj_id]
-                self.scene_canvas.canvas.update()
-            
-            # Selektion zurücksetzen
-            self.scene_canvas.selected_object_id = None
-            # Szene speichern
-            self.scene_canvas.save_scene()
-            # Inspector aktualisieren (kein Objekt mehr ausgewählt)
-            if self.inspector:
-                self.inspector.on_object_selected({})
-            # Code-Editor zurück zur globalen game.py
-            if self.code_editor:
-                self.code_editor.set_object(None, None)
-    
-    def _on_inspector_object_created(self):
-        """Wird aufgerufen wenn im Inspector ein neues leeres Objekt erstellt werden soll"""
-        if self.scene_canvas:
-            self.scene_canvas.add_empty_object()
+    # Inspector-Methoden entfernt - wird durch Rechtsklick-Menü ersetzt
     
     def _on_object_selected_for_code(self, obj_data: dict):
         """Wird aufgerufen wenn ein Objekt ausgewählt wird - aktualisiert Code-Editor"""
@@ -635,9 +551,8 @@ class EditorMainWindow(QMainWindow):
     
     def _on_assets_updated(self):
         """Wird aufgerufen wenn Assets im Asset Browser aktualisiert wurden"""
-        # Inspector aktualisieren, damit neue Sprites in der ComboBox erscheinen
-        if self.inspector:
-            self.inspector._load_sprites()
+        # Assets wurden aktualisiert - Canvas kann neu geladen werden falls nötig
+        pass
     
     def _on_project_settings_changed(self):
         """Wird aufgerufen wenn Projekt-Einstellungen geändert wurden"""
@@ -645,13 +560,6 @@ class EditorMainWindow(QMainWindow):
         if self.scene_canvas and self.project_path:
             self.scene_canvas._load_grid_settings()
             self.scene_canvas.canvas.update()
-        
-        # Inspector Grid-Größe aktualisieren
-        if self.inspector:
-            self.inspector._load_grid_size()
-            # Felder neu laden wenn Objekt ausgewählt ist
-            if self.inspector.current_object:
-                self.inspector._update_fields()
     
     def _on_splitter_moved(self, pos: int, index: int):
         """Wird aufgerufen wenn Splitter bewegt wird"""
@@ -675,22 +583,7 @@ class EditorMainWindow(QMainWindow):
             sizes[0] = 0
             self.main_splitter.setSizes(sizes)
     
-    def _toggle_inspector(self, checked: bool):
-        """Zeigt/versteckt den Inspector"""
-        if not self.main_splitter:
-            return
-        
-        if checked:
-            # Inspector anzeigen (auf 200px setzen)
-            sizes = self.main_splitter.sizes()
-            if sizes[2] < 50:
-                sizes[2] = 200
-                self.main_splitter.setSizes(sizes)
-        else:
-            # Inspector verstecken (auf 0 setzen)
-            sizes = self.main_splitter.sizes()
-            sizes[2] = 0
-            self.main_splitter.setSizes(sizes)
+    # Inspector-Toggle entfernt
     
     def _on_sprite_double_clicked(self, sprite_path: str):
         """Wird aufgerufen wenn ein Sprite doppelgeklickt wird - öffnet Tab"""
@@ -818,9 +711,7 @@ class EditorMainWindow(QMainWindow):
             if self.scene_canvas:
                 self.scene_canvas.canvas.update()
                 self.scene_canvas.save_scene()
-            # Inspector aktualisieren falls Objekt ausgewählt
-            if self.inspector and self.inspector.current_object:
-                self.inspector._update_fields()
+            # Canvas aktualisiert sich automatisch
         self._update_undo_redo_buttons()
     
     def _redo(self):
@@ -834,9 +725,7 @@ class EditorMainWindow(QMainWindow):
             if self.scene_canvas:
                 self.scene_canvas.canvas.update()
                 self.scene_canvas.save_scene()
-            # Inspector aktualisieren falls Objekt ausgewählt
-            if self.inspector and self.inspector.current_object:
-                self.inspector._update_fields()
+            # Canvas aktualisiert sich automatisch
         self._update_undo_redo_buttons()
     
     def _update_undo_redo_buttons(self):
