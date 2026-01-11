@@ -14,8 +14,8 @@ class Console(QWidget):
     
     def __init__(self):
         super().__init__()
-        self.is_expanded = False  # Terminal ist standardmäßig minimiert
-        self.expanded_height = 200  # Standard-Höhe
+        self.is_expanded = True  # Terminal ist standardmäßig aufgeklappt
+        self.expanded_height = 200  # Standard-Höhe (immer sichtbar)
         self._init_ui()
     
     def _init_ui(self):
@@ -80,25 +80,33 @@ class Console(QWidget):
         
         self.setLayout(layout)
         
-        # Standardmäßig minimiert starten
-        self.setMinimumHeight(25)  # Mindesthöhe für Header (sichtbar bleiben)
-        self.setMaximumHeight(25)  # Startet minimiert
-        self.setFixedHeight(25)  # Fixe Höhe für minimierten Zustand
-        self.text_edit.setVisible(False)
-        self.toggle_button.setText("▶")
+        # Standardmäßig AUFGEKLAPPT starten, damit Debug-Ausgaben sichtbar sind
+        # Fixe Höhe setzen, damit Konsole immer sichtbar ist
+        self.setMinimumHeight(self.expanded_height)  # Mindesthöhe = expanded_height
+        self.setMaximumHeight(self.expanded_height)  # Maximale Höhe = expanded_height
+        self.setFixedHeight(self.expanded_height)  # Fixe Höhe
+        self.text_edit.setVisible(True)
+        self.toggle_button.setText("▼")
+    
+    def ensure_visible(self):
+        """Stellt sicher, dass die Konsole sichtbar ist und aufklappt"""
+        if not self.is_expanded:
+            self.expand()
+        # Scroll zum Ende, damit neue Ausgaben sichtbar sind
+        self.text_edit.moveCursor(QTextCursor.End)
     
     def _toggle_expanded(self):
         """Klappt das Terminal auf/zu"""
         self.is_expanded = not self.is_expanded
         if self.is_expanded:
-            self.setMinimumHeight(25)  # Mindesthöhe für Header
+            # Aufgeklappt: Fixe Höhe setzen
+            self.setMinimumHeight(self.expanded_height)
             self.setMaximumHeight(self.expanded_height)
-            # Entfernt fixe Höhe, erlaubt Größenänderung durch Splitter
-            self.setFixedHeight(-1)
-            self.resize(self.width(), self.expanded_height)  # Setzt initiale Höhe
+            self.setFixedHeight(self.expanded_height)
             self.toggle_button.setText("▼")
             self.text_edit.setVisible(True)
         else:
+            # Minimiert: Nur Header sichtbar
             self.setMinimumHeight(25)  # Mindesthöhe für Header (sichtbar bleiben)
             self.setMaximumHeight(25)  # Nur Header sichtbar
             self.setFixedHeight(25)  # Fixe Höhe für minimierten Zustand
@@ -109,6 +117,8 @@ class Console(QWidget):
         """Klappt das Terminal auf"""
         if not self.is_expanded:
             self._toggle_expanded()
+        # Sicherstellen dass Konsole sichtbar ist
+        self.ensure_visible()
     
     def append_output(self, text: str):
         """Fügt normale Ausgabe hinzu (weiß)"""

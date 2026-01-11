@@ -29,7 +29,15 @@ class EditorMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("GameDev-Edu Editor")
-        self.setGeometry(100, 100, 1600, 1000)
+        # Fenster-Größe und Position zurücksetzen, damit Konsole sichtbar ist
+        from PySide6.QtWidgets import QApplication
+        screen = QApplication.primaryScreen().geometry()
+        # Fenster-Größe: 80% der Bildschirmgröße, zentriert
+        window_width = int(screen.width() * 0.8)
+        window_height = int(screen.height() * 0.8)
+        window_x = (screen.width() - window_width) // 2
+        window_y = (screen.height() - window_height) // 2
+        self.setGeometry(window_x, window_y, window_width, window_height)
         
         # Dark-Mode für das gesamte Hauptfenster
         self.setStyleSheet("""
@@ -324,6 +332,10 @@ class EditorMainWindow(QMainWindow):
         self.console = Console()
         # Höhe wird von der Console selbst verwaltet
         
+        # Console-Referenz an SceneCanvas übergeben
+        if self.scene_canvas:
+            self.scene_canvas.console = self.console
+        
         # Stacked Widget für Projekt-View und Sprite-Views
         self.view_stack = QStackedWidget()
         
@@ -334,10 +346,14 @@ class EditorMainWindow(QMainWindow):
         project_widget = QWidget()
         project_layout = QVBoxLayout()
         project_layout.setContentsMargins(0, 0, 0, 0)
+        project_layout.setSpacing(2)  # Kleiner Abstand zwischen Splitter und Console
         
         # Keine Tab-Buttons mehr - direkt main_splitter und console
-        project_layout.addWidget(main_splitter)
-        project_layout.addWidget(self.console)
+        # Splitter nimmt den meisten Platz, Console am unteren Rand (immer sichtbar)
+        project_layout.addWidget(main_splitter, stretch=1)  # Splitter nimmt verfügbaren Platz
+        project_layout.addWidget(self.console, stretch=0)  # Console fixe Höhe, kein Stretch
+        # Sicherstellen dass Console nicht zu klein wird
+        self.console.setMinimumHeight(25)  # Mindesthöhe für Header
         project_widget.setLayout(project_layout)
         
         self.view_stack.addWidget(project_widget)  # Index 0 = Projekt

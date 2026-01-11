@@ -185,6 +185,26 @@
       },
       "ground": false,
       "code": "# Code für object_12\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_12\")\n\ndef update():\n    # Deine Logik hier\n    pass\n"
+    },
+    {
+      "id": "object_17",
+      "type": "sprite",
+      "sprite": "assets/images/bear.png",
+      "x": 288,
+      "y": 384,
+      "width": 96,
+      "height": 96,
+      "layer": "default",
+      "collider": {
+        "enabled": true,
+        "type": "rect",
+        "x": 288,
+        "y": 384,
+        "width": 96,
+        "height": 96
+      },
+      "ground": false,
+      "code": "# Code für object_17\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_17\")\n\ndef update():\n    # Deine Logik hier\n    pass\n"
     }
   ]
 }

@@ -23,6 +23,7 @@ class SceneCanvas(QWidget):
         self.objects: List[Dict[str, Any]] = []
         self.selected_object_id: Optional[str] = None
         self.undo_redo_manager = None  # Wird vom main_window gesetzt
+        self.console = None  # Wird vom main_window gesetzt
         self._last_move_positions = {}  # Speichert letzte Positionen für Move-Commands
         
         # Zoom
@@ -847,7 +848,7 @@ class SceneCanvas(QWidget):
     def _calculate_sprite_bounds(self, sprite_path: str) -> tuple[int, int, int, int]:
         """
         Berechnet die Bounding Box um die sichtbaren Pixel eines Sprites
-        Gibt zurück: (min_x, min_y, width, height) relativ zum Sprite
+        Gibt zurück: (min_x, min_y, width, height) relativ zum Sprite (in Grid-Größe)
         """
         if not self.project_path or not sprite_path:
             return (0, 0, self.grid_size, self.grid_size)
@@ -861,70 +862,86 @@ class SceneCanvas(QWidget):
                 full_path = self.project_path / sprite_path
             
             if not full_path.exists():
-                print(f"[Canvas] Sprite nicht gefunden: {full_path}")
+                msg = f"[Canvas] Sprite nicht gefunden: {full_path}"
+                print(msg)
+                if self.console:
+                    self.console.append_debug(msg)
                 return (0, 0, self.grid_size, self.grid_size)
             
-            # Sprite laden
-            pixmap = QPixmap(str(full_path))
-            if pixmap.isNull():
-                print(f"[Canvas] Sprite konnte nicht geladen werden: {full_path}")
+            # Sprite als QImage laden (direkt, um Alpha-Kanal zu erhalten)
+            image = QImage(str(full_path))
+            if image.isNull():
+                msg = f"[Canvas] Sprite konnte nicht geladen werden: {full_path}"
+                print(msg)
+                if self.console:
+                    self.console.append_debug(msg)
                 return (0, 0, self.grid_size, self.grid_size)
             
-            # Original-Größe speichern
-            original_width = pixmap.width()
-            original_height = pixmap.height()
+            # Sicherstellen dass Alpha-Kanal vorhanden ist
+            if image.format() != QImage.Format.Format_ARGB32:
+                image = image.convertToFormat(QImage.Format.Format_ARGB32)
             
-            # Auf Grid-Größe skalieren falls nötig
-            # Wichtig: Alpha-Kanal beim Skalieren erhalten
-            if original_width != self.grid_size or original_height != self.grid_size:
-                # Sicherstellen dass Alpha-Kanal beim Skalieren erhalten bleibt
-                pixmap = pixmap.scaled(self.grid_size, self.grid_size, 
-                                     Qt.AspectRatioMode.IgnoreAspectRatio,
-                                     Qt.TransformationMode.SmoothTransformation)
-                # Nach Skalierung Alpha-Kanal prüfen und ggf. wiederherstellen
-                if pixmap.hasAlphaChannel() == False:
-                    # Falls Alpha-Kanal verloren ging, aus Original wiederherstellen
-                    temp_image = pixmap.toImage()
-                    temp_image = temp_image.convertToFormat(QImage.Format.Format_ARGB32)
-                    pixmap = QPixmap.fromImage(temp_image)
+            # Original-Größe
+            original_width = image.width()
+            original_height = image.height()
             
-            # In QImage konvertieren für Pixel-Zugriff (mit Alpha-Kanal)
-            image = pixmap.toImage()
-            image = image.convertToFormat(QImage.Format.Format_ARGB32)  # Sicherstellen dass Alpha-Kanal vorhanden ist
-            
-            # Bounding Box finden (sichtbare Pixel)
-            min_x = self.grid_size
-            min_y = self.grid_size
-            max_x = -1
-            max_y = -1
+            # Bounding Box im Original-Bild finden
+            orig_min_x = original_width
+            orig_min_y = original_height
+            orig_max_x = -1
+            orig_max_y = -1
             has_visible_pixels = False
             
-            # Durch alle Pixel iterieren
-            for y in range(image.height()):
-                for x in range(image.width()):
+            # Durch alle Pixel des Original-Bildes iterieren
+            for y in range(original_height):
+                for x in range(original_width):
                     pixel = image.pixel(x, y)
-                    # Alpha-Kanal mit QColor extrahieren (zuverlässiger als Bit-Shifting)
+                    # Alpha-Kanal extrahieren
                     color = QColor(pixel)
                     alpha = color.alpha()
                     
                     # Nur Pixel mit Alpha > 0 als sichtbar betrachten
                     if alpha > 0:
                         has_visible_pixels = True
-                        min_x = min(min_x, x)
-                        min_y = min(min_y, y)
-                        max_x = max(max_x, x)
-                        max_y = max(max_y, y)
+                        orig_min_x = min(orig_min_x, x)
+                        orig_min_y = min(orig_min_y, y)
+                        orig_max_x = max(orig_max_x, x)
+                        orig_max_y = max(orig_max_y, y)
             
             if not has_visible_pixels:
                 # Keine sichtbaren Pixel - volle Größe verwenden
-                print(f"[Canvas] Keine sichtbaren Pixel gefunden in {sprite_path}")
+                msg = f"[Canvas] Keine sichtbaren Pixel gefunden in {sprite_path}"
+                print(msg)
+                if self.console:
+                    self.console.append_debug(msg)
                 return (0, 0, self.grid_size, self.grid_size)
             
-            # Bounding Box berechnen
-            width = max_x - min_x + 1
-            height = max_y - min_y + 1
+            # Bounds im Original-Bild
+            orig_width = orig_max_x - orig_min_x + 1
+            orig_height = orig_max_y - orig_min_y + 1
             
-            print(f"[Canvas] Sprite-Bounds für {sprite_path}: min_x={min_x}, min_y={min_y}, width={width}, height={height}")
+            # Auf Grid-Größe skalieren (falls nötig)
+            if original_width != self.grid_size or original_height != self.grid_size:
+                # Skalierungsfaktoren
+                scale_x = self.grid_size / original_width
+                scale_y = self.grid_size / original_height
+                
+                # Bounds skalieren
+                min_x = int(orig_min_x * scale_x)
+                min_y = int(orig_min_y * scale_y)
+                width = int(orig_width * scale_x)
+                height = int(orig_height * scale_y)
+            else:
+                # Keine Skalierung nötig
+                min_x = orig_min_x
+                min_y = orig_min_y
+                width = orig_width
+                height = orig_height
+            
+            msg = f"[Canvas] Sprite-Bounds für {sprite_path}: Original({orig_min_x},{orig_min_y},{orig_width},{orig_height}) -> Grid({min_x},{min_y},{width},{height})"
+            print(msg)
+            if self.console:
+                self.console.append_debug(msg)
             
             return (min_x, min_y, width, height)
         except Exception as e:
