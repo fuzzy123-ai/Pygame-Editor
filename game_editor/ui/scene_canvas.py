@@ -616,18 +616,8 @@ class SceneCanvas(QWidget):
                     obj["width"] = self.grid_size
                     obj["height"] = self.grid_size
                     
-                    # Kollisionsbox mitbewegen (Offset beibehalten)
-                    collider_data = obj.get("collider", {})
-                    if collider_data.get("enabled", False):
-                        # Delta berechnen
-                        delta_x = grid_x - old_x
-                        delta_y = grid_y - old_y
-                        
-                        # Absolute Position der Kollisionsbox aktualisieren
-                        if "x" in collider_data:
-                            collider_data["x"] = collider_data.get("x", old_x) + delta_x
-                        if "y" in collider_data:
-                            collider_data["y"] = collider_data.get("y", old_y) + delta_y
+                    # Kollisionsbox bewegt sich automatisch mit, da sie relativ zum Objekt gespeichert ist
+                    # Keine Anpassung nötig - die Kollisionsbox-Position wird beim Zeichnen aus Objekt-Position + Offset berechnet
                     
                     # Signal für Inspector
                     self.object_selected.emit(obj)
@@ -877,9 +867,21 @@ class SceneCanvas(QWidget):
                     self.console.append_debug(msg)
                 return (0, 0, self.grid_size, self.grid_size)
             
+            # Bild-Format prüfen
+            original_format = image.format()
+            has_alpha = image.hasAlphaChannel()
+            msg_format = f"[Canvas] Bild-Format: {original_format}, Hat Alpha: {has_alpha}, Größe: {image.width()}x{image.height()}"
+            print(msg_format)
+            if self.console:
+                self.console.append_debug(msg_format)
+            
             # Sicherstellen dass Alpha-Kanal vorhanden ist
             if image.format() != QImage.Format.Format_ARGB32:
                 image = image.convertToFormat(QImage.Format.Format_ARGB32)
+                msg_convert = f"[Canvas] Bild konvertiert zu ARGB32"
+                print(msg_convert)
+                if self.console:
+                    self.console.append_debug(msg_convert)
             
             # Original-Größe
             original_width = image.width()
@@ -893,20 +895,39 @@ class SceneCanvas(QWidget):
             has_visible_pixels = False
             
             # Durch alle Pixel des Original-Bildes iterieren
+            visible_pixel_count = 0
+            transparent_pixel_count = 0
+            alpha_values = {}  # Debug: Zähle verschiedene Alpha-Werte
+            
             for y in range(original_height):
                 for x in range(original_width):
                     pixel = image.pixel(x, y)
-                    # Alpha-Kanal extrahieren
+                    # Alpha-Kanal extrahieren - mehrere Methoden versuchen
                     color = QColor(pixel)
-                    alpha = color.alpha()
+                    alpha_qcolor = color.alpha()
                     
-                    # Nur Pixel mit Alpha > 0 als sichtbar betrachten
-                    if alpha > 0:
+                    # Direkt aus Pixel extrahieren (ARGB32 Format: Alpha ist die oberen 8 Bits)
+                    alpha_direct = (pixel >> 24) & 0xFF
+                    
+                    # Verwende den direkten Wert, da QColor.alpha() manchmal nicht korrekt ist
+                    alpha = alpha_direct
+                    
+                    # Debug: Alpha-Werte zählen (nur erste 100 Pixel, um Performance zu sparen)
+                    if visible_pixel_count + transparent_pixel_count < 100:
+                        alpha_rounded = (alpha // 10) * 10  # Auf 10er-Schritte runden
+                        alpha_values[alpha_rounded] = alpha_values.get(alpha_rounded, 0) + 1
+                    
+                    # Nur Pixel mit Alpha > 10 als sichtbar betrachten (Schwellenwert für Anti-Aliasing)
+                    # Alpha 0-10 = transparent, Alpha 11-255 = sichtbar
+                    if alpha > 10:
                         has_visible_pixels = True
+                        visible_pixel_count += 1
                         orig_min_x = min(orig_min_x, x)
                         orig_min_y = min(orig_min_y, y)
                         orig_max_x = max(orig_max_x, x)
                         orig_max_y = max(orig_max_y, y)
+                    else:
+                        transparent_pixel_count += 1
             
             if not has_visible_pixels:
                 # Keine sichtbaren Pixel - volle Größe verwenden
@@ -938,7 +959,9 @@ class SceneCanvas(QWidget):
                 width = orig_width
                 height = orig_height
             
-            msg = f"[Canvas] Sprite-Bounds für {sprite_path}: Original({orig_min_x},{orig_min_y},{orig_width},{orig_height}) -> Grid({min_x},{min_y},{width},{height})"
+            # Debug: Alpha-Werte-Statistik
+            alpha_stats = ", ".join([f"Alpha {k}: {v}" for k, v in sorted(alpha_values.items())[:5]])  # Top 5
+            msg = f"[Canvas] Sprite-Bounds für {sprite_path}: Original({orig_min_x},{orig_min_y},{orig_width},{orig_height}) -> Grid({min_x},{min_y},{width},{height}) | Sichtbar: {visible_pixel_count}, Transparent: {transparent_pixel_count} | {alpha_stats}"
             print(msg)
             if self.console:
                 self.console.append_debug(msg)
@@ -962,18 +985,26 @@ class SceneCanvas(QWidget):
                 sprite_path = obj.get("sprite")
                 if sprite_path:
                     min_x, min_y, width, height = self._calculate_sprite_bounds(sprite_path)
-                    obj_x = obj.get("x", 0)
-                    obj_y = obj.get("y", 0)
                     
-                    # Absolute Position der Kollisionsbox
-                    collider_data["x"] = obj_x + min_x
-                    collider_data["y"] = obj_y + min_y
+                    # RELATIVE Position der Kollisionsbox (Offset vom Objekt)
+                    # Sicherstellen dass Kollisionsbox innerhalb des Grid-Feldes bleibt
+                    # min_x und min_y sind bereits relativ zum Sprite (0-96)
+                    # Aber wir müssen sicherstellen, dass die Kollisionsbox innerhalb des Grid-Feldes (0-grid_size) bleibt
+                    offset_x = max(0, min(min_x, self.grid_size - width))  # Innerhalb Grid-Feld
+                    offset_y = max(0, min(min_y, self.grid_size - height))  # Innerhalb Grid-Feld
+                    
+                    # Breite und Höhe anpassen, falls nötig
+                    width = min(width, self.grid_size - offset_x)
+                    height = min(height, self.grid_size - offset_y)
+                    
+                    collider_data["offset_x"] = offset_x  # RELATIV zum Objekt
+                    collider_data["offset_y"] = offset_y  # RELATIV zum Objekt
                     collider_data["width"] = width
                     collider_data["height"] = height
                 else:
-                    # Kein Sprite - volle Objekt-Größe verwenden
-                    collider_data["x"] = obj.get("x", 0)
-                    collider_data["y"] = obj.get("y", 0)
+                    # Kein Sprite - volle Objekt-Größe verwenden (kein Offset)
+                    collider_data["offset_x"] = 0  # RELATIV zum Objekt
+                    collider_data["offset_y"] = 0  # RELATIV zum Objekt
                     collider_data["width"] = obj.get("width", self.grid_size)
                     collider_data["height"] = obj.get("height", self.grid_size)
                 
@@ -1331,12 +1362,45 @@ class CanvasWidget(QWidget):
         if not collider_data.get("enabled", False):
             return
         
-        # Kollisionsbox-Position und -Größe
-        # Falls nicht explizit gesetzt, Objekt-Position/Größe verwenden
-        collider_x = int(collider_data.get("x", obj.get("x", 0)))
-        collider_y = int(collider_data.get("y", obj.get("y", 0)))
+        # Objekt-Position
+        obj_x = int(obj.get("x", 0))
+        obj_y = int(obj.get("y", 0))
+        
+        # Kollisionsbox-Position RELATIV zum Objekt (Offset)
+        # Falls alte absolute Position vorhanden (für Rückwärtskompatibilität), umrechnen
+        if "x" in collider_data and "y" in collider_data:
+            # Alte absolute Position - in relative umrechnen
+            old_collider_x = int(collider_data.get("x", obj_x))
+            old_collider_y = int(collider_data.get("y", obj_y))
+            offset_x = old_collider_x - obj_x
+            offset_y = old_collider_y - obj_y
+            # Alte absolute Werte entfernen
+            if "x" in collider_data:
+                del collider_data["x"]
+            if "y" in collider_data:
+                del collider_data["y"]
+            # Relative Werte setzen
+            collider_data["offset_x"] = max(0, min(offset_x, self.parent_canvas.grid_size - 1))
+            collider_data["offset_y"] = max(0, min(offset_y, self.parent_canvas.grid_size - 1))
+        
+        # Relative Position (Offset) vom Objekt
+        offset_x = int(collider_data.get("offset_x", 0))
+        offset_y = int(collider_data.get("offset_y", 0))
         collider_width = int(collider_data.get("width", obj.get("width", 32)))
         collider_height = int(collider_data.get("height", obj.get("height", 32)))
+        
+        # Absolute Position berechnen (Objekt-Position + Offset)
+        collider_x = obj_x + offset_x
+        collider_y = obj_y + offset_y
+        
+        # Sicherstellen dass Kollisionsbox innerhalb des Grid-Feldes bleibt
+        # (sollte bereits durch offset_x/offset_y sichergestellt sein, aber zur Sicherheit)
+        max_offset_x = self.parent_canvas.grid_size - collider_width
+        max_offset_y = self.parent_canvas.grid_size - collider_height
+        offset_x = max(0, min(offset_x, max_offset_x))
+        offset_y = max(0, min(offset_y, max_offset_y))
+        collider_x = obj_x + offset_x
+        collider_y = obj_y + offset_y
         
         # Rote Box für Kollisionsbox zeichnen
         painter.setPen(QPen(QColor(255, 0, 0), 2))
