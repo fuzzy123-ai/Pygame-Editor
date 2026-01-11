@@ -55,9 +55,9 @@ class CodeEditor(QWidget):
         layout.setSpacing(0)
         
         # Toolbar mit Start/Stop Buttons
-        toolbar_layout = QHBoxLayout()
-        toolbar_layout.setContentsMargins(5, 5, 5, 5)
-        toolbar_layout.setSpacing(5)
+        self.toolbar_layout = QHBoxLayout()
+        self.toolbar_layout.setContentsMargins(5, 5, 5, 5)
+        self.toolbar_layout.setSpacing(5)
         
         # Start-Button mit grünem Dreieck (Dark-Mode)
         self.run_button = QPushButton()
@@ -85,7 +85,7 @@ class CodeEditor(QWidget):
         self._create_play_icon()
         self.run_button.clicked.connect(self.run_requested.emit)
         self.run_button.setEnabled(False)
-        toolbar_layout.addWidget(self.run_button)
+        self.toolbar_layout.addWidget(self.run_button)
         
         # Stop-Button (Dark-Mode)
         self.stop_button = QPushButton("⏹")
@@ -114,9 +114,13 @@ class CodeEditor(QWidget):
         """)
         self.stop_button.clicked.connect(self.stop_requested.emit)
         self.stop_button.setEnabled(False)
-        toolbar_layout.addWidget(self.stop_button)
+        self.toolbar_layout.addWidget(self.stop_button)
         
-        toolbar_layout.addStretch()
+        # Undo/Redo Buttons (werden vom main_window gesetzt)
+        self.undo_button = None  # Wird vom main_window gesetzt
+        self.redo_button = None  # Wird vom main_window gesetzt
+        
+        self.toolbar_layout.addStretch()
         
         # Label (wird dynamisch aktualisiert) - Dark-Mode
         self.label = QLabel("Code Editor (game.py)")
@@ -127,7 +131,7 @@ class CodeEditor(QWidget):
             color: #d4d4d4;
             border-radius: 3px;
         """)
-        toolbar_layout.addWidget(self.label)
+        self.toolbar_layout.addWidget(self.label)
         
         # Fragezeichen-Button für Hilfe (Dark-Mode)
         from PySide6.QtWidgets import QToolButton
@@ -154,10 +158,10 @@ class CodeEditor(QWidget):
             }
         """)
         self.help_button.clicked.connect(self._toggle_help_overlay)
-        toolbar_layout.addWidget(self.help_button)
+        self.toolbar_layout.addWidget(self.help_button)
         
         toolbar_widget = QWidget()
-        toolbar_widget.setLayout(toolbar_layout)
+        toolbar_widget.setLayout(self.toolbar_layout)
         toolbar_widget.setStyleSheet("""
             background-color: #1e1e1e;
             border-bottom: 1px solid #3d3d3d;
@@ -510,6 +514,21 @@ def update():
     def set_undo_redo_manager(self, manager):
         """Setzt den Undo/Redo-Manager"""
         self.undo_redo_manager = manager
+    
+    def set_undo_redo_buttons(self, undo_button, redo_button):
+        """Setzt die Undo/Redo Buttons vom main_window"""
+        self.undo_button = undo_button
+        self.redo_button = redo_button
+        
+        # Buttons zur Toolbar hinzufügen (nach Stop-Button)
+        if undo_button and redo_button and hasattr(self, 'toolbar_layout'):
+            # Finde die Position nach dem Stop-Button
+            stop_index = self.toolbar_layout.indexOf(self.stop_button)
+            if stop_index >= 0:
+                self.toolbar_layout.insertWidget(stop_index + 1, undo_button)
+                self.toolbar_layout.insertWidget(stop_index + 2, redo_button)
+                undo_button.setVisible(True)
+                redo_button.setVisible(True)
     
     def _on_text_changed_with_undo(self):
         """Wird aufgerufen wenn Text geändert wird - mit Undo/Redo-Tracking"""

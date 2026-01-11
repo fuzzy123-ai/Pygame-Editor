@@ -273,8 +273,10 @@ class EditorMainWindow(QMainWindow):
         self.redo_button.setEnabled(False)
         toolbar.addWidget(self.redo_button)
         
-        # Run-Button und Stop-Button (werden nicht mehr in der Toolbar angezeigt)
-        # Sie werden im Code-Editor verwendet
+        # Toolbar verstecken - Buttons werden jetzt im Code-Editor angezeigt
+        toolbar.setVisible(False)
+        
+        # Run-Button und Stop-Button (werden im Code-Editor verwendet)
         self.run_button = QPushButton("▶")
         self.run_button.setToolTip("Spiel starten")
         self.run_button.setFixedSize(30, 30)
@@ -304,7 +306,7 @@ class EditorMainWindow(QMainWindow):
         
         # Linker Bereich: Asset Browser
         self.asset_browser = AssetBrowser()
-        self.asset_browser.setMaximumWidth(300)
+        self.asset_browser.setMaximumWidth(360)  # 60px breiter (300 + 60)
         self.asset_browser.setMinimumWidth(150)  # Mindestbreite damit es sichtbar bleibt
         main_splitter.addWidget(self.asset_browser)
         
@@ -374,6 +376,9 @@ class EditorMainWindow(QMainWindow):
         if self.code_editor:
             self.code_editor.set_undo_redo_manager(self.undo_redo_manager)
             self.code_editor.undo_redo_changed.connect(self._update_undo_redo_buttons)
+            # Undo/Redo Buttons an Code-Editor übergeben
+            if hasattr(self, 'undo_button') and hasattr(self, 'redo_button'):
+                self.code_editor.set_undo_redo_buttons(self.undo_button, self.redo_button)
         
         # Initial Buttons-Status setzen
         self._update_undo_redo_buttons()
@@ -690,9 +695,7 @@ class EditorMainWindow(QMainWindow):
                 [sys.executable, "-u", "-m", "game_editor.engine.runtime", str(self.project_path)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,  # Beide Streams getrennt für sofortige Fehlererkennung
-                text=True,  # Text-Modus mit UTF-8 (dank PYTHONIOENCODING)
-                encoding='utf-8',
-                errors='replace',  # Fehlerhafte Zeichen durch Ersatzzeichen ersetzen
+                text=False,  # Binärmodus - wir dekodieren manuell
                 bufsize=1,  # Line-buffered für sofortige Ausgabe
                 env=env
             )

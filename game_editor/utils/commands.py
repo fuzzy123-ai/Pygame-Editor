@@ -73,6 +73,41 @@ class ObjectAddCommand(Command):
         return f"Objekt '{self.object_id}' hinzugefügt"
 
 
+class ObjectAddMultipleCommand(Command):
+    """Befehl für das Hinzufügen mehrerer Objekte auf einmal"""
+    
+    def __init__(self, objects_list: List[Dict], new_objects: List[Dict], canvas_update_callback: Callable):
+        """
+        Args:
+            objects_list: Liste aller Objekte
+            new_objects: Liste der hinzuzufügenden Objekte
+            canvas_update_callback: Callback zum Aktualisieren des Canvas
+        """
+        self.objects_list = objects_list
+        self.new_objects = [obj.copy() for obj in new_objects]
+        self.object_ids = [obj.get("id") for obj in new_objects]
+        self.canvas_update = canvas_update_callback
+    
+    def execute(self) -> None:
+        """Fügt alle Objekte hinzu"""
+        for new_obj in self.new_objects:
+            obj_id = new_obj.get("id")
+            # Prüfen ob Objekt bereits existiert (anhand ID)
+            existing = any(obj.get("id") == obj_id for obj in self.objects_list)
+            if not existing:
+                self.objects_list.append(new_obj.copy())
+        self.canvas_update()
+    
+    def undo(self) -> None:
+        """Entfernt alle Objekte"""
+        self.objects_list[:] = [obj for obj in self.objects_list if obj.get("id") not in self.object_ids]
+        self.canvas_update()
+    
+    def get_description(self) -> str:
+        count = len(self.object_ids)
+        return f"{count} Objekt{'e' if count != 1 else ''} hinzugefügt"
+
+
 class ObjectDeleteCommand(Command):
     """Befehl für das Löschen eines Objekts"""
     

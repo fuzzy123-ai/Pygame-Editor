@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QListWidget, QLabel,
                                 QPushButton, QHBoxLayout, QFileDialog, QMessageBox,
                                 QComboBox, QDialog, QScrollArea, QMenu, QSlider, QFrame)
 from PySide6.QtCore import Signal, Qt, QPoint, QMimeData, QFileSystemWatcher, QTimer
-from PySide6.QtGui import QPixmap, QIcon, QDrag
+from PySide6.QtGui import QPixmap, QIcon, QDrag, QDragEnterEvent, QDropEvent
 from pathlib import Path
 import shutil
 from typing import Dict
@@ -268,8 +268,8 @@ class AssetBrowser(QWidget):
         def on_click():
             # Alle Frames zurücksetzen
             self._clear_selection()
-            # Dieses Frame highlighten
-            item_frame.setStyleSheet("border: 2px solid #4a9eff; background-color: #e3f2fd; padding: 5px;")
+            # Dieses Frame highlighten (dunkelgrau)
+            item_frame.setStyleSheet("border: 2px solid #4a9eff; background-color: #808080; padding: 5px;")
             if self.project_path:
                 try:
                     rel_path = img_path.relative_to(self.project_path)
@@ -282,24 +282,57 @@ class AssetBrowser(QWidget):
         
         def on_right_click(event):
             menu = QMenu(self)
-            # Pfad anzeigen
-            if self.project_path:
-                try:
-                    rel_path = img_path.relative_to(self.project_path)
-                    path_action = menu.addAction(f"Pfad: {rel_path}")
-                    path_action.setEnabled(False)
-                except ValueError:
-                    pass
+            
+            # Vollständigen Pfad anzeigen
+            full_path_str = str(img_path)
+            path_action = menu.addAction(f"Pfad: {full_path_str}")
+            path_action.setEnabled(False)
+            
             menu.addSeparator()
-            details_action = menu.addAction("Details anzeigen...")
-            details_action.triggered.connect(lambda: self._show_asset_details(str(img_path)))
-            menu.exec(event.globalPosition().toPoint())
+            
+            # Im Windows Explorer öffnen
+            open_explorer_action = menu.addAction("Im Explorer öffnen")
+            def open_in_explorer():
+                import subprocess
+                import os
+                # Windows Explorer mit dem Ordner öffnen und Datei auswählen
+                try:
+                    # Windows: explorer /select,"pfad"
+                    subprocess.Popen(f'explorer /select,"{full_path_str}"', shell=True)
+                except Exception as e:
+                    # Fallback: Nur Ordner öffnen
+                    folder_path = os.path.dirname(full_path_str)
+                    subprocess.Popen(f'explorer "{folder_path}"', shell=True)
+            open_explorer_action.triggered.connect(open_in_explorer)
+            
+            # Details-Menü entfernt (erzeugte Ping-Sound)
+            
+            # Menü anzeigen (ohne Sound)
+            menu.exec(event.globalPos())
+            
+            # Nach Rechtsklick-Menü: Highlight wiederherstellen
+            self._clear_selection()
+            item_frame.setStyleSheet("border: 2px solid #4a9eff; background-color: #808080; padding: 5px;")
         
-        item_frame.mousePressEvent = lambda e: on_click() if e.button() == Qt.LeftButton else None
-        item_frame.mouseDoubleClickEvent = lambda e: on_double_click() if e.button() == Qt.LeftButton else None
-        item_frame.contextMenuEvent = on_right_click
+        # Linksklick: Auswahl (überall im Frame)
+        def on_frame_click(event):
+            if event.button() == Qt.LeftButton:
+                on_click()
         
-        # Drag & Drop: Maus-Druck auf Thumbnail
+        def on_frame_double_click(event):
+            if event.button() == Qt.LeftButton:
+                on_double_click()
+        
+        # Rechtsklick: Menü (überall im Frame)
+        def on_frame_right_click(event):
+            on_right_click(event)
+        
+        # Event-Handler auf item_frame setzen (funktioniert überall im Kasten)
+        item_frame.mousePressEvent = on_frame_click
+        item_frame.mouseDoubleClickEvent = on_frame_double_click
+        item_frame.contextMenuEvent = on_frame_right_click
+        
+        # Drag & Drop: Maus-Druck auf Thumbnail (nur Linksklick)
         if thumb_label:
             def thumb_mouse_press(event):
                 if event.button() == Qt.LeftButton:
@@ -323,7 +356,7 @@ class AssetBrowser(QWidget):
     def _clear_selection(self):
         """Setzt alle Asset-Frames auf Standard-Style zurück"""
         for frame in self.asset_frames.values():
-            frame.setStyleSheet("border: 1px solid #ccc; padding: 5px;")
+            frame.setStyleSheet("border: 1px solid #ccc; padding: 5px; background-color: transparent;")
     
     def _select_asset(self, file_path: str):
         """Selektiert/Highlightet ein Asset anhand des Dateipfads"""
@@ -338,7 +371,7 @@ class AssetBrowser(QWidget):
             # Direkt suchen
             if str(target_path) in self.asset_frames:
                 frame = self.asset_frames[str(target_path)]
-                frame.setStyleSheet("border: 2px solid #4a9eff; background-color: #e3f2fd; padding: 5px;")
+                frame.setStyleSheet("border: 2px solid #4a9eff; background-color: #808080; padding: 5px;")
                 # Scrollen zum Frame
                 self._scroll_to_frame(frame)
                 return
@@ -357,7 +390,7 @@ class AssetBrowser(QWidget):
                     asset_path = Path(asset_path_str)
                     # Prüfen ob Pfade übereinstimmen
                     if asset_path == full_path or asset_path.name == target_path.name:
-                        frame.setStyleSheet("border: 2px solid #4a9eff; background-color: #e3f2fd; padding: 5px;")
+                        frame.setStyleSheet("border: 2px solid #4a9eff; background-color: #808080; padding: 5px;")
                         # Scrollen zum Frame
                         self._scroll_to_frame(frame)
                         return
@@ -546,9 +579,17 @@ class AssetBrowser(QWidget):
             self.settings_changed.emit()
     
     def dragEnterEvent(self, event: QDragEnterEvent):
-        """Wird aufgerufen wenn eine Datei über den Asset Browser gezogen wird"""
+        """Wird aufgerufen wenn etwas über den Asset Browser gezogen wird"""
+        # Prüfen ob es Objekte vom Canvas sind (Text mit "object_id:" Präfix)
+        if event.mimeData().hasText():
+            text = event.mimeData().text()
+            # Objekt-ID Format: "object_id:xxx"
+            if text.startswith("object_id:"):
+                event.acceptProposedAction()
+                return
+        
+        # Prüfen ob es Bilddateien sind (für Import)
         if event.mimeData().hasUrls():
-            # Prüfen ob es Bilddateien sind
             urls = event.mimeData().urls()
             has_images = False
             for url in urls:
@@ -653,11 +694,31 @@ class AssetBrowser(QWidget):
             print(f"[Asset Browser] {error_count} Bild(er) konnten nicht verarbeitet werden")
     
     def dropEvent(self, event: QDropEvent):
-        """Wird aufgerufen wenn eine Datei in den Asset Browser gedroppt wird"""
+        """Wird aufgerufen wenn etwas in den Asset Browser gedroppt wird"""
         if not self.project_path:
             print("[Asset Browser] FEHLER: Kein Projekt geöffnet!")
             event.ignore()
             return
+        
+        # Prüfen ob es ein Objekt vom Canvas ist (zum Löschen)
+        if event.mimeData().hasText():
+            text = event.mimeData().text()
+            if text.startswith("object_id:"):
+                obj_id = text.replace("object_id:", "")
+                # Objekt löschen über SceneCanvas
+                # Signal an Main Window senden, damit es das Objekt löschen kann
+                from ..ui.main_window import EditorMainWindow
+                # Finde das Main Window
+                widget = self
+                while widget:
+                    if isinstance(widget, EditorMainWindow):
+                        # SceneCanvas finden und Objekt löschen
+                        if hasattr(widget, 'scene_canvas') and widget.scene_canvas:
+                            widget.scene_canvas._delete_object_by_id(obj_id)
+                        break
+                    widget = widget.parent()
+                event.accept()
+                return
         
         if event.mimeData().hasUrls():
             urls = event.mimeData().urls()

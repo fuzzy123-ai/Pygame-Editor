@@ -28,27 +28,28 @@ class GameOutputReader(QThread):
         
         while self._running and self.process.poll() is None:
             try:
-                # Text lesen (dank PYTHONIOENCODING=utf-8 sollte UTF-8 verwendet werden)
-                line = self.process.stdout.readline()
-                if line:
-                    # Bereits dekodiert, nur rstrip
-                    decoded_line = line.rstrip('\n\r')
-                    self.output_received.emit(decoded_line)
+                # Binärdaten lesen und manuell dekodieren
+                line_bytes = self.process.stdout.readline()
+                if line_bytes:
+                    # Manuell dekodieren mit Fehlerbehandlung
+                    try:
+                        decoded_line = line_bytes.decode('utf-8', errors='replace').rstrip('\n\r')
+                        self.output_received.emit(decoded_line)
+                    except Exception:
+                        # Fallback: Versuche mit anderen Encodings
+                        try:
+                            decoded_line = line_bytes.decode('latin-1', errors='replace').rstrip('\n\r')
+                            self.output_received.emit(decoded_line)
+                        except Exception:
+                            pass  # Ignoriere fehlerhafte Zeilen komplett
                 elif self.process.poll() is not None:
                     # Prozess beendet, keine weiteren Daten
                     break
-            except (UnicodeDecodeError, UnicodeError) as e:
-                # Fallback: Fehlerhafte Zeichen ersetzen
-                try:
-                    # Versuche nochmal mit Fehlerbehandlung
-                    if hasattr(line, 'encode'):
-                        # Falls es bereits ein String ist, ist alles OK
-                        decoded_line = line.rstrip('\n\r')
-                        self.output_received.emit(decoded_line)
-                except Exception:
-                    pass  # Ignoriere fehlerhafte Zeilen
-            except Exception:
-                break
+            except Exception as e:
+                # Alle anderen Fehler ignorieren (z.B. wenn Prozess beendet wird)
+                if self.process.poll() is not None:
+                    break
+                continue
     
     def _read_stderr(self):
         """Liest stderr in einem separaten Thread (Fehler werden sofort angezeigt)"""
@@ -57,27 +58,28 @@ class GameOutputReader(QThread):
         
         while self._running and self.process.poll() is None:
             try:
-                # Text lesen (dank PYTHONIOENCODING=utf-8 sollte UTF-8 verwendet werden)
-                line = self.process.stderr.readline()
-                if line:
-                    # Bereits dekodiert, nur rstrip
-                    decoded_line = line.rstrip('\n\r')
-                    self.error_received.emit(decoded_line)
+                # Binärdaten lesen und manuell dekodieren
+                line_bytes = self.process.stderr.readline()
+                if line_bytes:
+                    # Manuell dekodieren mit Fehlerbehandlung
+                    try:
+                        decoded_line = line_bytes.decode('utf-8', errors='replace').rstrip('\n\r')
+                        self.error_received.emit(decoded_line)
+                    except Exception:
+                        # Fallback: Versuche mit anderen Encodings
+                        try:
+                            decoded_line = line_bytes.decode('latin-1', errors='replace').rstrip('\n\r')
+                            self.error_received.emit(decoded_line)
+                        except Exception:
+                            pass  # Ignoriere fehlerhafte Zeilen komplett
                 elif self.process.poll() is not None:
                     # Prozess beendet, keine weiteren Daten
                     break
-            except (UnicodeDecodeError, UnicodeError) as e:
-                # Fallback: Fehlerhafte Zeichen ersetzen
-                try:
-                    # Versuche nochmal mit Fehlerbehandlung
-                    if hasattr(line, 'encode'):
-                        # Falls es bereits ein String ist, ist alles OK
-                        decoded_line = line.rstrip('\n\r')
-                        self.error_received.emit(decoded_line)
-                except Exception:
-                    pass  # Ignoriere fehlerhafte Zeilen
-            except Exception:
-                break
+            except Exception as e:
+                # Alle anderen Fehler ignorieren (z.B. wenn Prozess beendet wird)
+                if self.process.poll() is not None:
+                    break
+                continue
     
     def run(self):
         """Startet Threads zum Lesen von stdout und stderr"""
@@ -108,21 +110,35 @@ class GameOutputReader(QThread):
             try:
                 stdout, stderr = self.process.communicate(timeout=0.5)
                 if stdout:
-                    # Bereits Text (dank PYTHONIOENCODING=utf-8)
+                    # Binärdaten manuell dekodieren
                     try:
-                        for line in stdout.splitlines():
+                        decoded_stdout = stdout.decode('utf-8', errors='replace')
+                        for line in decoded_stdout.splitlines():
                             if line.strip():
                                 self.output_received.emit(line.strip())
                     except Exception:
-                        pass
+                        try:
+                            decoded_stdout = stdout.decode('latin-1', errors='replace')
+                            for line in decoded_stdout.splitlines():
+                                if line.strip():
+                                    self.output_received.emit(line.strip())
+                        except Exception:
+                            pass
                 if stderr:
-                    # Bereits Text (dank PYTHONIOENCODING=utf-8)
+                    # Binärdaten manuell dekodieren
                     try:
-                        for line in stderr.splitlines():
+                        decoded_stderr = stderr.decode('utf-8', errors='replace')
+                        for line in decoded_stderr.splitlines():
                             if line.strip():
                                 self.error_received.emit(line.strip())
                     except Exception:
-                        pass
+                        try:
+                            decoded_stderr = stderr.decode('latin-1', errors='replace')
+                            for line in decoded_stderr.splitlines():
+                                if line.strip():
+                                    self.error_received.emit(line.strip())
+                        except Exception:
+                            pass
             except Exception:
                 pass
         

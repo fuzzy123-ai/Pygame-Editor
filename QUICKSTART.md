@@ -3,8 +3,10 @@
 ## Editor starten
 
 ### Windows (einfachste Methode)
-1. Doppelklick auf `start_editor.bat`
+1. Doppelklick auf `start_editor_direct.bat` (startet direkt)
 2. Fertig! ✅
+
+**Alternative:** `start_editor.bat` (prüft Requirements vor dem Start)
 
 ### Kommandozeile (alle Plattformen)
 ```bash

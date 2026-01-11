@@ -10,8 +10,8 @@
       "id": "object_3",
       "type": "sprite",
       "sprite": "assets/images/066.png",
-      "x": 480,
-      "y": 384,
+      "x": -1248,
+      "y": 960,
       "width": 96,
       "height": 96,
       "collider": {
@@ -30,8 +30,8 @@
       "id": "object_10",
       "type": "empty",
       "sprite": "assets/images/066.png",
-      "x": 576,
-      "y": 192,
+      "x": -1344,
+      "y": 1056,
       "width": 96,
       "height": 96,
       "layer": "default",
@@ -41,37 +41,6 @@
       },
       "code": "# Code für object_10\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_10\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
       "ground": true
-    },
-    {
-      "id": "object_8",
-      "type": "sprite",
-      "sprite": "assets/images/009.png",
-      "x": 672,
-      "y": 192,
-      "width": 96,
-      "height": 96,
-      "layer": "background",
-      "collider": {
-        "enabled": true,
-        "type": "rect"
-      },
-      "ground": false,
-      "code": "# Code für object_8\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_8\")\n\ndef update():\n    # Deine Logik hier\n    pass\n"
-    },
-    {
-      "id": "object_13",
-      "type": "sprite",
-      "sprite": "assets/images/east.png",
-      "x": 288,
-      "y": 576,
-      "width": 96,
-      "height": 96,
-      "layer": "foreground",
-      "collider": {
-        "enabled": true,
-        "type": "rect"
-      },
-      "ground": false
     },
     {
       "id": "object_7",
@@ -84,7 +53,11 @@
       "layer": "default",
       "collider": {
         "enabled": true,
-        "type": "rect"
+        "type": "rect",
+        "offset_x": 27,
+        "offset_y": 16,
+        "width": 39,
+        "height": 66
       },
       "ground": false,
       "code": "# Code für object_7\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_7\")\n\ndef update():\n    # Deine Logik hier\n    pass\n"
@@ -93,8 +66,8 @@
       "id": "object_14",
       "type": "sprite",
       "sprite": "assets/images/066.png",
-      "x": 864,
-      "y": 192,
+      "x": -1248,
+      "y": 1056,
       "width": 96,
       "height": 96,
       "layer": "default",
@@ -131,10 +104,10 @@
       "collider": {
         "enabled": true,
         "type": "rect",
-        "width": 96,
-        "height": 96,
-        "offset_x": 0,
-        "offset_y": 0
+        "width": 39,
+        "height": 66,
+        "offset_x": 27,
+        "offset_y": 16
       },
       "ground": false,
       "code": "# Code für object_15\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_15\")\n\ndef update():\n    # Deine Logik hier\n    pass\n"
@@ -150,7 +123,11 @@
       "layer": "default",
       "collider": {
         "enabled": true,
-        "type": "rect"
+        "type": "rect",
+        "offset_x": 27,
+        "offset_y": 16,
+        "width": 39,
+        "height": 66
       },
       "ground": false
     },
@@ -158,14 +135,18 @@
       "id": "object_11",
       "type": "sprite",
       "sprite": "assets/images/009.png",
-      "x": 672,
-      "y": 192,
+      "x": 768,
+      "y": 288,
       "width": 96,
       "height": 96,
       "layer": "default",
       "collider": {
         "enabled": true,
-        "type": "rect"
+        "type": "rect",
+        "offset_x": 0,
+        "offset_y": 25,
+        "width": 96,
+        "height": 34
       },
       "ground": false,
       "code": "# Code für object_11\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_11\")\n\ndef update():\n    # Deine Logik hier\n    pass\n"
@@ -174,8 +155,8 @@
       "id": "object_12",
       "type": "sprite",
       "sprite": "assets/images/066.png",
-      "x": 480,
-      "y": 192,
+      "x": -1344,
+      "y": 960,
       "width": 96,
       "height": 96,
       "layer": "default",
@@ -183,7 +164,7 @@
         "enabled": true,
         "type": "rect"
       },
-      "ground": false,
+      "ground": true,
       "code": "# Code für object_12\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_12\")\n\ndef update():\n    # Deine Logik hier\n    pass\n"
     },
     {
@@ -205,6 +186,204 @@
       },
       "ground": false,
       "code": "# Code für object_17\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_17\")\n\ndef update():\n    # Deine Logik hier\n    pass\n"
+    },
+    {
+      "id": "object_18",
+      "type": "sprite",
+      "sprite": "assets/images/066.png",
+      "x": -192,
+      "y": 288,
+      "width": 96,
+      "height": 96,
+      "layer": "default",
+      "collider": {
+        "enabled": false,
+        "type": "rect"
+      },
+      "ground": false,
+      "code": "# Code für object_18\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_18\")\n\ndef update():\n    # Deine Logik hier\n    pass\n"
+    },
+    {
+      "id": "object_19",
+      "type": "sprite",
+      "sprite": "assets/images/009.png",
+      "x": 480,
+      "y": 384,
+      "width": 96,
+      "height": 96,
+      "layer": "default",
+      "collider": {
+        "enabled": true,
+        "type": "rect",
+        "offset_x": 0,
+        "offset_y": 25,
+        "width": 96,
+        "height": 34
+      },
+      "ground": false,
+      "code": "# Code für object_19\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_19\")\n\ndef update():\n    # Deine Logik hier\n    pass\n"
+    },
+    {
+      "id": "object_20",
+      "type": "sprite",
+      "sprite": "assets/images/bear.png",
+      "x": 96,
+      "y": 288,
+      "width": 96,
+      "height": 96,
+      "layer": "default",
+      "collider": {
+        "enabled": true,
+        "type": "rect",
+        "offset_x": 27,
+        "offset_y": 16,
+        "width": 39,
+        "height": 66
+      },
+      "ground": false
+    },
+    {
+      "id": "object_22",
+      "type": "sprite",
+      "sprite": "assets/images/066.png",
+      "x": -1152,
+      "y": 1056,
+      "width": 96,
+      "height": 96,
+      "layer": "default",
+      "collider": {
+        "enabled": true,
+        "type": "rect"
+      },
+      "ground": true,
+      "code": "# Code für object_12\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_12\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
+      "name": "object_1"
+    },
+    {
+      "id": "object_23",
+      "type": "sprite",
+      "sprite": "assets/images/009.png",
+      "x": 576,
+      "y": 384,
+      "width": 96,
+      "height": 96,
+      "layer": "background",
+      "collider": {
+        "enabled": true,
+        "type": "rect",
+        "offset_x": 0,
+        "offset_y": 25,
+        "width": 96,
+        "height": 34
+      },
+      "ground": false,
+      "code": "# Code für object_8\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_8\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
+      "name": "object_21_1"
+    },
+    {
+      "id": "object_25",
+      "type": "sprite",
+      "sprite": "assets/images/009.png",
+      "x": 672,
+      "y": 384,
+      "width": 96,
+      "height": 96,
+      "layer": "background",
+      "collider": {
+        "enabled": true,
+        "type": "rect",
+        "offset_x": 0,
+        "offset_y": 25,
+        "width": 96,
+        "height": 34
+      },
+      "ground": false,
+      "code": "# Code für object_8\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_8\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
+      "name": "object_21_1_1_1"
+    },
+    {
+      "id": "object_26",
+      "type": "sprite",
+      "sprite": "assets/images/009.png",
+      "x": 384,
+      "y": 480,
+      "width": 96,
+      "height": 96,
+      "layer": "background",
+      "collider": {
+        "enabled": true,
+        "type": "rect",
+        "offset_x": 0,
+        "offset_y": 25,
+        "width": 96,
+        "height": 34
+      },
+      "ground": false,
+      "code": "# Code für object_8\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_8\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
+      "name": "object_21_1_1_2"
+    },
+    {
+      "id": "object_21",
+      "type": "sprite",
+      "sprite": "assets/images/009.png",
+      "x": 768,
+      "y": 384,
+      "width": 96,
+      "height": 96,
+      "layer": "background",
+      "collider": {
+        "enabled": true,
+        "type": "rect",
+        "offset_x": 0,
+        "offset_y": 25,
+        "width": 96,
+        "height": 34
+      },
+      "ground": false,
+      "code": "# Code für object_8\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_8\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
+      "name": "object_21_1_1"
+    },
+    {
+      "id": "object_24",
+      "type": "sprite",
+      "sprite": "assets/images/009.png",
+      "x": 960,
+      "y": 384,
+      "width": 96,
+      "height": 96,
+      "layer": "background",
+      "collider": {
+        "enabled": true,
+        "type": "rect",
+        "offset_x": 0,
+        "offset_y": 25,
+        "width": 96,
+        "height": 34
+      },
+      "ground": false,
+      "code": "# Code für object_8\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_8\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
+      "name": "object_21_1_1_3"
+    },
+    {
+      "id": "object_27",
+      "type": "sprite",
+      "sprite": "assets/images/009.png",
+      "x": 576,
+      "y": 480,
+      "width": 96,
+      "height": 96,
+      "layer": "background",
+      "collider": {
+        "enabled": true,
+        "type": "rect",
+        "offset_x": 0,
+        "offset_y": 25,
+        "width": 96,
+        "height": 34
+      },
+      "ground": false,
+      "code": "# Code für object_8\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_8\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
+      "name": "object_21_1_2"
     }
   ]
 }

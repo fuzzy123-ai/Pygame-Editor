@@ -3,8 +3,8 @@ Scene Canvas - 2D Canvas für Objekte mit Drag & Drop, Zoom, Game Preview
 """
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QHBoxLayout, 
                                 QPushButton, QSlider, QComboBox, QMenu)
-from PySide6.QtCore import Qt, Signal, QPoint, QRect, QTimer
-from PySide6.QtGui import QPainter, QPaintEvent, QColor, QPen, QBrush, QPixmap, QImage, QWheelEvent, QContextMenuEvent
+from PySide6.QtCore import Qt, Signal, QPoint, QRect, QTimer, QMimeData
+from PySide6.QtGui import QPainter, QPaintEvent, QColor, QPen, QBrush, QPixmap, QImage, QWheelEvent, QContextMenuEvent, QDrag
 from pathlib import Path
 import json
 from typing import Optional, Dict, Any, List
@@ -21,10 +21,16 @@ class SceneCanvas(QWidget):
         self.project_path: Optional[Path] = None
         self.scene_data: Dict[str, Any] = {}
         self.objects: List[Dict[str, Any]] = []
-        self.selected_object_id: Optional[str] = None
+        self.selected_object_id: Optional[str] = None  # Für Rückwärtskompatibilität
+        self.selected_object_ids: List[str] = []  # Mehrfachauswahl
         self.undo_redo_manager = None  # Wird vom main_window gesetzt
         self.console = None  # Wird vom main_window gesetzt
         self._last_move_positions = {}  # Speichert letzte Positionen für Move-Commands
+        self._copied_collider = None  # Zwischenablage für kopierte Kollisionsbox
+        self._duplicating = False  # Flag für Alt+Drag Duplizieren
+        self._duplicate_preview_mode = False  # Flag für Duplizieren mit Vorschau
+        self._duplicate_preview_objects = []  # Liste der Vorschau-Objekte (Dicts)
+        self._duplicate_preview_offset = QPoint(0, 0)  # Offset für Vorschau-Position
         
         # Zoom
         self.zoom_factor = 1.0
@@ -525,103 +531,233 @@ class SceneCanvas(QWidget):
                     break
         
         if clicked_obj:
-            self.selected_object_id = clicked_obj.get("id")
-            self.dragging = True
-            self.drag_start_pos = pos
-            self.drag_object_id = clicked_obj.get("id")
-            # Drag-Start-Positionen speichern (World-Koordinaten und Canvas-Koordinaten)
-            self._drag_start_world_pos = QPoint(clicked_obj.get("x", 0), clicked_obj.get("y", 0))
-            self._drag_start_canvas_pos = pos  # Rohe Canvas-Position für Delta-Berechnung
+            clicked_obj_id = clicked_obj.get("id")
+            
+            # Shift-Taste: Mehrfachauswahl
+            modifiers = getattr(self, '_mouse_modifiers', Qt.NoModifier)
+            if modifiers & Qt.ShiftModifier:
+                # Objekt zur Auswahl hinzufügen oder entfernen
+                if clicked_obj_id in self.selected_object_ids:
+                    self.selected_object_ids.remove(clicked_obj_id)
+                else:
+                    self.selected_object_ids.append(clicked_obj_id)
+            else:
+                # Prüfen ob angeklicktes Objekt bereits ausgewählt ist
+                if clicked_obj_id in self.selected_object_ids:
+                    # Objekt ist bereits ausgewählt - alle ausgewählten Objekte bewegen
+                    # Auswahl bleibt bestehen, keine Änderung
+                    pass
+                else:
+                    # Normale Auswahl: Nur dieses Objekt
+                    self.selected_object_ids = [clicked_obj_id]
+            
+            # Für Rückwärtskompatibilität
+            self.selected_object_id = self.selected_object_ids[0] if self.selected_object_ids else None
+            
+            # Alt-Taste: Duplizieren statt Bewegen
+            if modifiers & Qt.AltModifier:
+                self._duplicating = True
+            else:
+                self._duplicating = False
+                self.dragging = True
+                self.drag_start_pos = pos
+                self.drag_object_id = clicked_obj_id
+                # Drag-Start-Positionen für alle ausgewählten Objekte speichern
+                self._drag_start_positions = {}  # Dict: obj_id -> (x, y)
+                self._drag_start_canvas_pos = pos  # Rohe Canvas-Position für Delta-Berechnung
+                
+                # Start-Positionen aller ausgewählten Objekte speichern
+                for obj_id in self.selected_object_ids:
+                    obj = next((o for o in self.objects if o.get("id") == obj_id), None)
+                    if obj:
+                        obj_layer = obj.get("layer", "default")
+                        if obj_layer == self.current_layer:  # Nur Objekte im aktiven Layer
+                            self._drag_start_positions[obj_id] = QPoint(obj.get("x", 0), obj.get("y", 0))
+            
             self.object_selected.emit(clicked_obj)
         else:
-            # Kein Objekt angeklickt - Auswahl zurücksetzen
-            self.selected_object_id = None
-            self.dragging = False
-            self.drag_object_id = None
-            self.object_selected.emit({})  # Leeres Dictionary = keine Auswahl
-            # Drag-Start-Positionen löschen
-            if hasattr(self, '_drag_start_world_pos'):
-                delattr(self, '_drag_start_world_pos')
-            if hasattr(self, '_drag_start_canvas_pos'):
-                delattr(self, '_drag_start_canvas_pos')
+            # Kein Objekt angeklickt - Auswahl zurücksetzen (außer bei Shift)
+            modifiers = getattr(self, '_mouse_modifiers', Qt.NoModifier)
+            if not (modifiers & Qt.ShiftModifier):
+                self.selected_object_ids = []
+                self.selected_object_id = None
+                self.dragging = False
+                self.drag_object_id = None
+                self.object_selected.emit({})  # Leeres Dictionary = keine Auswahl
+                # Drag-Start-Positionen löschen
+                if hasattr(self, '_drag_start_positions'):
+                    delattr(self, '_drag_start_positions')
+                if hasattr(self, '_drag_start_canvas_pos'):
+                    delattr(self, '_drag_start_canvas_pos')
         
         self.canvas.update()
     
     def _on_mouse_moved(self, pos: QPoint):
         """Wird aufgerufen wenn Maus bewegt wird"""
-        if self.dragging and self.drag_object_id:
-            # Objekt finden und Position direkt setzen (nur aktiver Layer)
+        # Alt+Drag: Duplizieren
+        if self._duplicating and self.drag_object_id:
+            # Delta berechnen
+            if not hasattr(self, '_drag_start_canvas_pos'):
+                return
+            
+            canvas_dx = pos.x() - self._drag_start_canvas_pos.x()
+            canvas_dy = pos.y() - self._drag_start_canvas_pos.y()
+            
+            # Nur duplizieren wenn genug bewegt wurde (mindestens 5 Pixel)
+            if abs(canvas_dx) < 5 and abs(canvas_dy) < 5:
+                return
+            
+            # Original-Objekt finden
+            original_obj = None
             for obj in self.objects:
+                if obj.get("id") == self.drag_object_id:
+                    original_obj = obj
+                    break
+            
+            if original_obj:
+                # Neues Objekt duplizieren
+                new_obj = original_obj.copy()
+                
+                # Neue eindeutige ID generieren
+                new_obj["id"] = self._generate_unique_id()
+                
+                # Neuen eindeutigen Namen generieren
+                base_name = new_obj.get("name", "")
+                if not base_name or not base_name.strip():
+                    # Wenn kein Name vorhanden, verwende die ID als Basis
+                    base_name = new_obj.get("id", "object")
+                new_obj["name"] = self._generate_unique_name(base_name)
+                
+                # Delta in World-Koordinaten umrechnen
+                dx = int(canvas_dx / self.zoom_factor)
+                dy = int(canvas_dy / self.zoom_factor)
+                
+                # Neue Position berechnen
+                new_x = original_obj.get("x", 0) + dx
+                new_y = original_obj.get("y", 0) + dy
+                
+                # An Grid ausrichten
+                grid_x = (new_x // self.grid_size) * self.grid_size
+                grid_y = (new_y // self.grid_size) * self.grid_size
+                grid_x = int(grid_x)
+                grid_y = int(grid_y)
+                
+                # Prüfen ob Position frei ist
+                grid_cell_x = grid_x // self.grid_size
+                grid_cell_y = grid_y // self.grid_size
+                position_free = True
+                for other_obj in self.objects:
+                    other_x = other_obj.get("x", 0)
+                    other_y = other_obj.get("y", 0)
+                    other_grid_x = other_x // self.grid_size
+                    other_grid_y = other_y // self.grid_size
+                    if other_grid_x == grid_cell_x and other_grid_y == grid_cell_y:
+                        position_free = False
+                        break
+                
+                if position_free:
+                    new_obj["x"] = grid_x
+                    new_obj["y"] = grid_y
+                    
+                    # Objekt hinzufügen
+                    self.objects.append(new_obj)
+                    
+                    # Undo/Redo-Command erstellen
+                    if self.undo_redo_manager:
+                        from ..utils.commands import ObjectAddCommand
+                        command = ObjectAddCommand(
+                            new_obj,
+                            self.objects,
+                            lambda: (self.canvas.update(), self.save_scene())
+                        )
+                        self.undo_redo_manager.execute_command(command)
+                        self.undo_redo_changed.emit()
+                    
+                    # Auswahl auf neues Objekt setzen
+                    self.selected_object_ids = [new_obj.get("id")]
+                    self.selected_object_id = new_obj.get("id")
+                    self.drag_object_id = new_obj.get("id")
+                    
+                    # Duplizieren beenden
+                    self._duplicating = False
+                    self.dragging = True
+                    # Start-Positionen für das neue Objekt speichern
+                    self._drag_start_positions = {new_obj.get("id"): QPoint(grid_x, grid_y)}
+                    self._drag_start_canvas_pos = pos
+                    
+                    self.save_scene()
+                    self.canvas.update()
+                    self.object_selected.emit(new_obj)
+            return
+        
+        if self.dragging and hasattr(self, '_drag_start_positions') and self._drag_start_positions:
+            # Sicherstellen dass Start-Positionen gesetzt sind
+            if not hasattr(self, '_drag_start_canvas_pos'):
+                self._drag_start_canvas_pos = pos
+            
+            # Delta in Canvas-Koordinaten berechnen (rohe Pixel-Differenz)
+            canvas_dx = pos.x() - self._drag_start_canvas_pos.x()
+            canvas_dy = pos.y() - self._drag_start_canvas_pos.y()
+            
+            # Delta in World-Koordinaten umrechnen (Zoom berücksichtigen)
+            dx = int(canvas_dx / self.zoom_factor)
+            dy = int(canvas_dy / self.zoom_factor)
+            
+            # Alle ausgewählten Objekte zusammen bewegen
+            for obj_id, start_pos in self._drag_start_positions.items():
+                obj = next((o for o in self.objects if o.get("id") == obj_id), None)
+                if not obj:
+                    continue
+                
                 # Nur Objekte des aktiven Layers können bewegt werden
                 obj_layer = obj.get("layer", "default")
                 if obj_layer != self.current_layer:
                     continue
-                    
-                if obj.get("id") == self.drag_object_id:
-                    # Sicherstellen dass Start-Positionen gesetzt sind
-                    if not hasattr(self, '_drag_start_world_pos') or not hasattr(self, '_drag_start_canvas_pos'):
-                        self._drag_start_world_pos = QPoint(obj.get("x", 0), obj.get("y", 0))
-                        self._drag_start_canvas_pos = pos
-                    
-                    # Delta in Canvas-Koordinaten berechnen (rohe Pixel-Differenz)
-                    canvas_dx = pos.x() - self._drag_start_canvas_pos.x()
-                    canvas_dy = pos.y() - self._drag_start_canvas_pos.y()
-                    
-                    # Delta in World-Koordinaten umrechnen (Zoom berücksichtigen)
-                    # View-Offset muss nicht berücksichtigt werden, da beide Positionen
-                    # relativ zum Canvas sind und der Offset sich rauskürzt
-                    dx = int(canvas_dx / self.zoom_factor)
-                    dy = int(canvas_dy / self.zoom_factor)
-                    
-                    # Neue Position berechnen (basierend auf ursprünglicher World-Position)
-                    new_x = self._drag_start_world_pos.x() + dx
-                    new_y = self._drag_start_world_pos.y() + dy
-                    
-                    # An Grid ausrichten (Grid-Position) - sicherstellen dass Position eindeutig ist
-                    grid_x = (new_x // self.grid_size) * self.grid_size
-                    grid_y = (new_y // self.grid_size) * self.grid_size
-                    
-                    # Sicherstellen dass Position genau auf Grid ist (keine Rundungsfehler)
-                    grid_x = int(grid_x)
-                    grid_y = int(grid_y)
-                    
-                    # Prüfen ob bereits ein anderes Objekt an dieser Grid-Position existiert
-                    grid_cell_x = grid_x // self.grid_size
-                    grid_cell_y = grid_y // self.grid_size
-                    position_free = True
-                    for other_obj in self.objects:
-                        if other_obj.get("id") == obj.get("id"):
-                            continue  # Ignoriere das aktuelle Objekt
-                        other_layer = other_obj.get("layer", "default")
-                        if other_layer != self.current_layer:
-                            continue  # Nur Objekte im selben Layer prüfen
-                        other_x = other_obj.get("x", 0)
-                        other_y = other_obj.get("y", 0)
-                        other_grid_x = other_x // self.grid_size
-                        other_grid_y = other_y // self.grid_size
-                        if other_grid_x == grid_cell_x and other_grid_y == grid_cell_y:
-                            position_free = False
-                            break
-                    
-                    # Alte Position für Kollisionsbox-Berechnung
-                    old_x = obj.get("x", 0)
-                    old_y = obj.get("y", 0)
-                    
-                    # Nur bewegen wenn Position frei ist
-                    if position_free:
-                        obj["x"] = grid_x
-                        obj["y"] = grid_y
-                    
-                    # Objekt-Größe = Grid-Größe sicherstellen
-                    obj["width"] = self.grid_size
-                    obj["height"] = self.grid_size
-                    
-                    # Kollisionsbox bewegt sich automatisch mit, da sie relativ zum Objekt gespeichert ist
-                    # Keine Anpassung nötig - die Kollisionsbox-Position wird beim Zeichnen aus Objekt-Position + Offset berechnet
-                    
-                    # Signal für Inspector
-                    self.object_selected.emit(obj)
-                    break
+                
+                # Neue Position berechnen (basierend auf ursprünglicher World-Position)
+                new_x = start_pos.x() + dx
+                new_y = start_pos.y() + dy
+                
+                # An Grid ausrichten (Grid-Position)
+                grid_x = (new_x // self.grid_size) * self.grid_size
+                grid_y = (new_y // self.grid_size) * self.grid_size
+                grid_x = int(grid_x)
+                grid_y = int(grid_y)
+                
+                # Prüfen ob bereits ein anderes Objekt an dieser Grid-Position existiert
+                grid_cell_x = grid_x // self.grid_size
+                grid_cell_y = grid_y // self.grid_size
+                position_free = True
+                for other_obj in self.objects:
+                    other_id = other_obj.get("id")
+                    # Ignoriere alle ausgewählten Objekte (werden gerade bewegt)
+                    if other_id in self._drag_start_positions:
+                        continue
+                    other_layer = other_obj.get("layer", "default")
+                    if other_layer != self.current_layer:
+                        continue  # Nur Objekte im selben Layer prüfen
+                    other_x = other_obj.get("x", 0)
+                    other_y = other_obj.get("y", 0)
+                    other_grid_x = other_x // self.grid_size
+                    other_grid_y = other_y // self.grid_size
+                    if other_grid_x == grid_cell_x and other_grid_y == grid_cell_y:
+                        position_free = False
+                        break
+                
+                # Nur bewegen wenn Position frei ist
+                if position_free:
+                    obj["x"] = grid_x
+                    obj["y"] = grid_y
+                
+                # Objekt-Größe = Grid-Größe sicherstellen
+                obj["width"] = self.grid_size
+                obj["height"] = self.grid_size
+            
+            # Signal für Inspector (vom angeklickten Objekt)
+            if self.drag_object_id:
+                clicked_obj = next((o for o in self.objects if o.get("id") == self.drag_object_id), None)
+                if clicked_obj:
+                    self.object_selected.emit(clicked_obj)
             
             self.canvas.update()
     
@@ -631,48 +767,49 @@ class SceneCanvas(QWidget):
     
     def _on_mouse_released(self, pos: QPoint):
         """Wird aufgerufen wenn Maus losgelassen wird"""
-        if self.dragging and self.drag_object_id and self.undo_redo_manager:
-            # Objekt finden und Move-Command erstellen
-            for obj in self.objects:
-                if obj.get("id") == self.drag_object_id:
-                    # Alte Position aus _drag_start_world_pos holen
-                    if hasattr(self, '_drag_start_world_pos'):
-                        old_x = self._drag_start_world_pos.x()
-                        old_y = self._drag_start_world_pos.y()
-                    else:
-                        # Fallback: Aus _last_move_positions
-                        old_pos = self._last_move_positions.get(self.drag_object_id, (obj.get("x", 0), obj.get("y", 0)))
-                        old_x, old_y = old_pos
-                    
-                    new_x = obj.get("x", 0)
-                    new_y = obj.get("y", 0)
-                    
-                    # Nur Command erstellen wenn Position sich geändert hat
-                    if old_x != new_x or old_y != new_y:
-                        from ..utils.commands import ObjectMoveCommand
-                        
-                        command = ObjectMoveCommand(
-                            obj,
-                            old_x,
-                            old_y,
-                            new_x,
-                            new_y,
-                            lambda: (self.canvas.update(), self.save_scene())
-                        )
-                        self.undo_redo_manager.execute_command(command)
-                        self.undo_redo_changed.emit()  # Signal für Button-Update
+        if self.dragging and hasattr(self, '_drag_start_positions') and self._drag_start_positions and self.undo_redo_manager:
+            # Move-Commands für alle ausgewählten Objekte erstellen
+            from ..utils.commands import ObjectMoveCommand
+            
+            for obj_id, start_pos in self._drag_start_positions.items():
+                obj = next((o for o in self.objects if o.get("id") == obj_id), None)
+                if not obj:
+                    continue
+                
+                # Nur Objekte des aktiven Layers
+                obj_layer = obj.get("layer", "default")
+                if obj_layer != self.current_layer:
+                    continue
+                
+                old_x = start_pos.x()
+                old_y = start_pos.y()
+                new_x = obj.get("x", 0)
+                new_y = obj.get("y", 0)
+                
+                # Nur Command erstellen wenn Position sich geändert hat
+                if old_x != new_x or old_y != new_y:
+                    command = ObjectMoveCommand(
+                        obj,
+                        old_x,
+                        old_y,
+                        new_x,
+                        new_y,
+                        lambda: (self.canvas.update(), self.save_scene())
+                    )
+                    self.undo_redo_manager.execute_command(command)
                     
                     # Letzte Position speichern
-                    self._last_move_positions[self.drag_object_id] = (new_x, new_y)
-                    break
+                    self._last_move_positions[obj_id] = (new_x, new_y)
             
-            self.save_scene()  # Auto-Save nach Drag
+            if self._drag_start_positions:
+                self.undo_redo_changed.emit()  # Signal für Button-Update
+                self.save_scene()  # Auto-Save nach Drag
         
         self.dragging = False
         self.drag_object_id = None
         # Drag-Start-Positionen löschen
-        if hasattr(self, '_drag_start_world_pos'):
-            delattr(self, '_drag_start_world_pos')
+        if hasattr(self, '_drag_start_positions'):
+            delattr(self, '_drag_start_positions')
         if hasattr(self, '_drag_start_canvas_pos'):
             delattr(self, '_drag_start_canvas_pos')
     
@@ -1013,34 +1150,316 @@ class SceneCanvas(QWidget):
                 self.canvas.update()
                 break
     
-    def _remove_collider(self, obj_id: str):
-        """Entfernt die Kollisionsbox von einem Objekt"""
+    def _copy_collider(self, obj_id: str):
+        """Kopiert die Kollisionsbox eines Objekts in die Zwischenablage"""
         for obj in self.objects:
             if obj.get("id") == obj_id:
                 collider_data = obj.get("collider", {})
-                collider_data["enabled"] = False
+                if collider_data.get("enabled", False):
+                    # Kollisionsbox-Daten kopieren (relative Position und Größe)
+                    # Falls alte absolute Position vorhanden, in relative umrechnen
+                    offset_x = collider_data.get("offset_x")
+                    offset_y = collider_data.get("offset_y")
+                    
+                    if offset_x is None or offset_y is None:
+                        # Alte absolute Position vorhanden - in relative umrechnen
+                        obj_x = obj.get("x", 0)
+                        obj_y = obj.get("y", 0)
+                        collider_x = collider_data.get("x", obj_x)
+                        collider_y = collider_data.get("y", obj_y)
+                        offset_x = collider_x - obj_x
+                        offset_y = collider_y - obj_y
+                    
+                    # Sicherstellen dass Offset innerhalb des Grid-Feldes ist
+                    width = collider_data.get("width", self.grid_size)
+                    height = collider_data.get("height", self.grid_size)
+                    max_offset_x = self.grid_size - width
+                    max_offset_y = self.grid_size - height
+                    offset_x = max(0, min(offset_x, max_offset_x))
+                    offset_y = max(0, min(offset_y, max_offset_y))
+                    
+                    self._copied_collider = {
+                        "offset_x": offset_x,
+                        "offset_y": offset_y,
+                        "width": width,
+                        "height": height,
+                        "type": collider_data.get("type", "rect")
+                    }
+                    msg = f"[Canvas] Kollisionsbox kopiert: offset=({self._copied_collider['offset_x']},{self._copied_collider['offset_y']}), size=({self._copied_collider['width']},{self._copied_collider['height']})"
+                    print(msg)
+                    if self.console:
+                        self.console.append_debug(msg)
+                break
+    
+    def _paste_collider(self, obj_id: str):
+        """Fügt die kopierte Kollisionsbox in ein Objekt ein"""
+        if self._copied_collider is None:
+            return
+        
+        for obj in self.objects:
+            if obj.get("id") == obj_id:
+                collider_data = obj.get("collider", {})
+                collider_data["enabled"] = True
+                collider_data["type"] = self._copied_collider.get("type", "rect")
+                
+                # Kopierte Werte übernehmen (relative Position und Größe)
+                collider_data["offset_x"] = self._copied_collider["offset_x"]
+                collider_data["offset_y"] = self._copied_collider["offset_y"]
+                collider_data["width"] = self._copied_collider["width"]
+                collider_data["height"] = self._copied_collider["height"]
+                
+                # Sicherstellen dass Kollisionsbox innerhalb des Grid-Feldes bleibt
+                max_offset_x = self.grid_size - collider_data["width"]
+                max_offset_y = self.grid_size - collider_data["height"]
+                collider_data["offset_x"] = max(0, min(collider_data["offset_x"], max_offset_x))
+                collider_data["offset_y"] = max(0, min(collider_data["offset_y"], max_offset_y))
+                
+                # Alte absolute Positionen entfernen (falls vorhanden)
+                if "x" in collider_data:
+                    del collider_data["x"]
+                if "y" in collider_data:
+                    del collider_data["y"]
+                
                 obj["collider"] = collider_data
                 self.save_scene()
                 self.canvas.update()
+                
+                msg = f"[Canvas] Kollisionsbox eingefügt: offset=({collider_data['offset_x']},{collider_data['offset_y']}), size=({collider_data['width']},{collider_data['height']})"
+                print(msg)
+                if self.console:
+                    self.console.append_debug(msg)
                 break
+    
+    def _remove_collider(self, obj_id: str):
+        """Entfernt die Kollisionsbox von einem Objekt"""
+        self._remove_collider_multiple([obj_id])
+    
+    def _remove_collider_multiple(self, obj_ids: List[str]):
+        """Entfernt die Kollisionsbox von mehreren Objekten"""
+        for obj in self.objects:
+            if obj.get("id") in obj_ids:
+                collider_data = obj.get("collider", {})
+                collider_data["enabled"] = False
+                obj["collider"] = collider_data
+        self.save_scene()
+        self.canvas.update()
+    
+    def _add_collider_multiple(self, obj_ids: List[str]):
+        """Fügt Kollisionsbox zu mehreren Objekten hinzu"""
+        for obj_id in obj_ids:
+            self._add_collider(obj_id)
+        self.save_scene()
+        self.canvas.update()
+    
+    def _paste_collider_multiple(self, obj_ids: List[str]):
+        """Fügt kopierte Kollisionsbox in mehrere Objekte ein"""
+        for obj_id in obj_ids:
+            self._paste_collider(obj_id)
+        self.save_scene()
+        self.canvas.update()
     
     def _add_ground(self, obj_id: str):
         """Fügt Boden-Eigenschaft zu einem Objekt hinzu"""
+        self._add_ground_multiple([obj_id])
+    
+    def _add_ground_multiple(self, obj_ids: List[str]):
+        """Fügt Boden-Eigenschaft zu mehreren Objekten hinzu"""
         for obj in self.objects:
-            if obj.get("id") == obj_id:
+            if obj.get("id") in obj_ids:
                 obj["ground"] = True
-                self.save_scene()
-                self.canvas.update()
-                break
+        self.save_scene()
+        self.canvas.update()
     
     def _remove_ground(self, obj_id: str):
         """Entfernt Boden-Eigenschaft von einem Objekt"""
+        self._remove_ground_multiple([obj_id])
+    
+    def _remove_ground_multiple(self, obj_ids: List[str]):
+        """Entfernt Boden-Eigenschaft von mehreren Objekten"""
         for obj in self.objects:
-            if obj.get("id") == obj_id:
+            if obj.get("id") in obj_ids:
                 obj["ground"] = False
-                self.save_scene()
-                self.canvas.update()
-                break
+        self.save_scene()
+        self.canvas.update()
+    
+    def _delete_object_by_id(self, obj_id: str):
+        """Löscht ein Objekt anhand seiner ID"""
+        self._delete_objects_multiple([obj_id])
+    
+    def _delete_objects_multiple(self, obj_ids: List[str]):
+        """Löscht mehrere Objekte anhand ihrer IDs"""
+        if not obj_ids or not self.undo_redo_manager:
+            return
+        
+        # Objekte finden und löschen
+        deleted_objects = []
+        for obj_id in obj_ids:
+            obj_to_delete = next((obj for obj in self.objects if obj.get("id") == obj_id), None)
+            if obj_to_delete:
+                deleted_objects.append(obj_to_delete)
+        
+        if not deleted_objects:
+            return
+        
+        # Alle Objekte löschen (mit Undo/Redo)
+        from ..utils.commands import ObjectDeleteCommand
+        for obj_to_delete in deleted_objects:
+            # ObjectDeleteCommand erwartet: (objects_list, deleted_object, canvas_update_callback)
+            command = ObjectDeleteCommand(
+                self.objects,
+                obj_to_delete,
+                lambda: (self.canvas.update(), self.save_scene())
+            )
+            self.undo_redo_manager.execute_command(command)
+        
+        self.undo_redo_changed.emit()
+        
+        # Auswahl zurücksetzen wenn gelöschte Objekte ausgewählt waren
+        for obj_id in obj_ids:
+            if obj_id in self.selected_object_ids:
+                self.selected_object_ids.remove(obj_id)
+            if self.selected_object_id == obj_id:
+                self.selected_object_id = None
+        
+        # Neue Auswahl setzen falls noch Objekte ausgewählt sind
+        if self.selected_object_ids:
+            self.selected_object_id = self.selected_object_ids[0]
+        else:
+            self.selected_object_ids = []
+            self.selected_object_id = None
+            self.object_selected.emit({})
+        
+        self.save_scene()
+        self.canvas.update()
+    
+    def _start_duplicate_preview(self, obj_ids: List[str]):
+        """Startet den Duplizieren-Vorschau-Modus"""
+        if not obj_ids:
+            return
+        
+        # Original-Objekte finden und kopieren
+        self._duplicate_preview_objects = []
+        self._duplicate_preview_offset = QPoint(0, 0)
+        
+        for obj_id in obj_ids:
+            obj = next((o for o in self.objects if o.get("id") == obj_id), None)
+            if obj:
+                obj_layer = obj.get("layer", "default")
+                if obj_layer == self.current_layer:  # Nur Objekte im aktiven Layer
+                    # Objekt kopieren (ohne ID, wird später generiert)
+                    obj_copy = obj.copy()
+                    self._duplicate_preview_objects.append({
+                        "original": obj,
+                        "copy": obj_copy,
+                        "start_pos": QPoint(obj.get("x", 0), obj.get("y", 0))
+                    })
+        
+        if self._duplicate_preview_objects:
+            self._duplicate_preview_mode = True
+            self.canvas.setCursor(Qt.CursorShape.CrossCursor)  # Kreuz-Cursor für Platzierung
+            self.canvas.update()
+    
+    def _place_duplicate_preview(self):
+        """Platziert die Vorschau-Objekte tatsächlich in der Szene"""
+        if not self._duplicate_preview_mode or not self._duplicate_preview_objects:
+            return
+        
+        new_objects = []
+        
+        for preview_data in self._duplicate_preview_objects:
+            obj_copy = preview_data["copy"]
+            start_pos = preview_data["start_pos"]
+            offset = self._duplicate_preview_offset
+            
+            # Neue Position berechnen
+            new_x = start_pos.x() + offset.x()
+            new_y = start_pos.y() + offset.y()
+            
+            # An Grid ausrichten
+            grid_x = (new_x // self.grid_size) * self.grid_size
+            grid_y = (new_y // self.grid_size) * self.grid_size
+            grid_x = int(grid_x)
+            grid_y = int(grid_y)
+            
+            # Prüfen ob Position frei ist (gegen bestehende Objekte UND bereits hinzugefügte neue Objekte)
+            # WICHTIG: Original-Objekte, die gerade dupliziert werden, ausschließen
+            original_obj_ids = {preview_data["original"].get("id") for preview_data in self._duplicate_preview_objects}
+            
+            grid_cell_x = grid_x // self.grid_size
+            grid_cell_y = grid_y // self.grid_size
+            position_free = True
+            
+            # Prüfe gegen bestehende Objekte (aber ignoriere Original-Objekte, die gerade dupliziert werden)
+            for other_obj in self.objects:
+                other_id = other_obj.get("id")
+                # Ignoriere Original-Objekte, die gerade dupliziert werden
+                if other_id in original_obj_ids:
+                    continue
+                    
+                other_x = other_obj.get("x", 0)
+                other_y = other_obj.get("y", 0)
+                other_grid_x = other_x // self.grid_size
+                other_grid_y = other_y // self.grid_size
+                if other_grid_x == grid_cell_x and other_grid_y == grid_cell_y:
+                    position_free = False
+                    break
+            
+            # Prüfe auch gegen bereits in dieser Runde hinzugefügte Objekte
+            if position_free:
+                for already_added in new_objects:
+                    other_x = already_added.get("x", 0)
+                    other_y = already_added.get("y", 0)
+                    other_grid_x = other_x // self.grid_size
+                    other_grid_y = other_y // self.grid_size
+                    if other_grid_x == grid_cell_x and other_grid_y == grid_cell_y:
+                        position_free = False
+                        break
+            
+            if not position_free:
+                continue  # Überspringe dieses Objekt wenn Position belegt
+            
+            # Neues Objekt erstellen
+            new_obj = obj_copy.copy()
+            new_obj["id"] = self._generate_unique_id()
+            # Namen aktualisieren - wenn kein Name vorhanden, ID als Basis verwenden
+            base_name = new_obj.get("name", "")
+            if not base_name or not base_name.strip():
+                # Wenn kein Name vorhanden, versuche einen Namen aus der ID zu generieren
+                base_name = new_obj.get("id", "object")
+            new_obj["name"] = self._generate_unique_name(base_name)
+            new_obj["x"] = grid_x
+            new_obj["y"] = grid_y
+            new_obj["width"] = self.grid_size
+            new_obj["height"] = self.grid_size
+            
+            new_objects.append(new_obj)
+        
+        # Objekte hinzufügen mit Undo/Redo (alle auf einmal)
+        if new_objects and self.undo_redo_manager:
+            from ..utils.commands import ObjectAddMultipleCommand
+            command = ObjectAddMultipleCommand(
+                self.objects,
+                new_objects,
+                lambda: (self.canvas.update(), self.save_scene())
+            )
+            self.undo_redo_manager.execute_command(command)
+            
+            self.undo_redo_changed.emit()
+            
+            # Auswahl auf neue Objekte setzen
+            new_ids = [obj.get("id") for obj in new_objects]
+            self.selected_object_ids = new_ids
+            self.selected_object_id = new_ids[0] if new_ids else None
+            if new_objects:
+                self.object_selected.emit(new_objects[0])
+        
+        # Vorschau-Modus beenden
+        self._duplicate_preview_mode = False
+        self._duplicate_preview_objects = []
+        self._duplicate_preview_offset = QPoint(0, 0)
+        self.canvas.setCursor(Qt.CursorShape.ArrowCursor)
+        self.save_scene()
+        self.canvas.update()
 
 
 class CanvasWidget(QWidget):
@@ -1068,8 +1487,16 @@ class CanvasWidget(QWidget):
             self.parent_canvas.pan_start_pos = event.position().toPoint()
             return
         
-        # Linke Maustaste für Objekt-Auswahl und Drag
+        # Linke Maustaste
         if event.button() == Qt.LeftButton:
+            # Wenn Duplizieren-Vorschau aktiv ist, Objekte platzieren
+            if self.parent_canvas._duplicate_preview_mode:
+                self.parent_canvas._place_duplicate_preview()
+                return
+            
+            # Modifier-Tasten prüfen
+            modifiers = event.modifiers()
+            self.parent_canvas._mouse_modifiers = modifiers  # Für später speichern
             self.mouse_pressed.emit(event.position().toPoint())
     
     def contextMenuEvent(self, event: QContextMenuEvent):
@@ -1120,49 +1547,154 @@ class CanvasWidget(QWidget):
                     break
         
         if clicked_obj:
-            # Objekt auswählen
-            self.parent_canvas.selected_object_id = clicked_obj.get("id")
+            # Objekt zur Auswahl hinzufügen (falls nicht bereits ausgewählt)
+            clicked_obj_id = clicked_obj.get("id")
+            if clicked_obj_id not in self.parent_canvas.selected_object_ids:
+                self.parent_canvas.selected_object_ids = [clicked_obj_id]
+                self.parent_canvas.selected_object_id = clicked_obj_id
             self.parent_canvas.object_selected.emit(clicked_obj)
             self.update()
             
             # Menü erstellen
             menu = QMenu(self)
             
+            # Anzahl der ausgewählten Objekte anzeigen
+            selected_count = len(self.parent_canvas.selected_object_ids)
+            if selected_count > 1:
+                menu.addAction(f"{selected_count} Objekte ausgewählt").setEnabled(False)
+                menu.addSeparator()
+            
+            # Duplizieren-Option (direkt nach Separator, nahe an Maus)
+            duplicate_action = menu.addAction("Duplizieren")
+            duplicate_action.triggered.connect(
+                lambda: self.parent_canvas._start_duplicate_preview(self.parent_canvas.selected_object_ids)
+            )
+            
+            # Löschen-Option (direkt nach Duplizieren, nahe an Maus)
+            delete_action = menu.addAction("Löschen")
+            delete_action.triggered.connect(
+                lambda: self.parent_canvas._delete_objects_multiple(self.parent_canvas.selected_object_ids)
+            )
+            
+            menu.addSeparator()
+            
             # Kollision-Untermenü
-            collider_data = clicked_obj.get("collider", {})
-            collider_enabled = collider_data.get("enabled", False)
+            # Prüfen ob alle ausgewählten Objekte Kollision haben
+            all_have_collision = True
+            any_has_collision = False
+            for obj_id in self.parent_canvas.selected_object_ids:
+                obj = next((o for o in self.parent_canvas.objects if o.get("id") == obj_id), None)
+                if obj:
+                    collider_data = obj.get("collider", {})
+                    if collider_data.get("enabled", False):
+                        any_has_collision = True
+                    else:
+                        all_have_collision = False
             
             collision_menu = menu.addMenu("Kollision")
-            if collider_enabled:
-                remove_collision_action = collision_menu.addAction("Kollision entfernen")
-                remove_collision_action.triggered.connect(
-                    lambda: self.parent_canvas._remove_collider(clicked_obj.get("id"))
+            
+            # Kollision hinzufügen - immer sichtbar, enabled wenn keine Kollision vorhanden
+            add_collision_action = collision_menu.addAction("Kollision hinzufügen")
+            if not (all_have_collision and any_has_collision):
+                add_collision_action.triggered.connect(
+                    lambda: self.parent_canvas._add_collider_multiple(self.parent_canvas.selected_object_ids)
                 )
             else:
-                add_collision_action = collision_menu.addAction("Kollision hinzufügen")
-                add_collision_action.triggered.connect(
-                    lambda: self.parent_canvas._add_collider(clicked_obj.get("id"))
+                add_collision_action.setEnabled(False)  # Ausgegraut wenn bereits Kollision vorhanden
+            
+            # Kollision entfernen - immer sichtbar, enabled wenn Kollision vorhanden
+            remove_collision_action = collision_menu.addAction("Kollision entfernen")
+            if all_have_collision and any_has_collision:
+                remove_collision_action.triggered.connect(
+                    lambda: self.parent_canvas._remove_collider_multiple(self.parent_canvas.selected_object_ids)
                 )
+            else:
+                remove_collision_action.setEnabled(False)  # Ausgegraut wenn keine Kollision vorhanden
+            
+            # Separator zwischen hinzufügen/entfernen und kopieren/einfügen
+            collision_menu.addSeparator()
+            
+            # Kollision kopieren - immer sichtbar, enabled wenn Kollision vorhanden
+            copy_collision_action = collision_menu.addAction("Kollision kopieren")
+            if all_have_collision and any_has_collision:
+                copy_collision_action.triggered.connect(
+                    lambda: self.parent_canvas._copy_collider(clicked_obj_id)
+                )
+            else:
+                copy_collision_action.setEnabled(False)  # Ausgegraut wenn keine Kollision vorhanden
+            
+            # Kollision einfügen - immer sichtbar, enabled wenn etwas kopiert wurde
+            paste_collision_action = collision_menu.addAction("Kollision einfügen")
+            if self.parent_canvas._copied_collider is not None:
+                paste_collision_action.triggered.connect(
+                    lambda: self.parent_canvas._paste_collider_multiple(self.parent_canvas.selected_object_ids)
+                )
+            else:
+                paste_collision_action.setEnabled(False)  # Ausgegraut wenn nichts kopiert wurde
             
             # Boden-Untermenü
-            ground_enabled = clicked_obj.get("ground", False)
+            # Prüfen ob alle ausgewählten Objekte Boden haben
+            all_have_ground = True
+            any_has_ground = False
+            for obj_id in self.parent_canvas.selected_object_ids:
+                obj = next((o for o in self.parent_canvas.objects if o.get("id") == obj_id), None)
+                if obj:
+                    if obj.get("ground", False):
+                        any_has_ground = True
+                    else:
+                        all_have_ground = False
+            
             ground_menu = menu.addMenu("Boden")
-            if ground_enabled:
-                remove_ground_action = ground_menu.addAction("Boden entfernen")
-                remove_ground_action.triggered.connect(
-                    lambda: self.parent_canvas._remove_ground(clicked_obj.get("id"))
+            
+            # Boden hinzufügen - immer sichtbar, enabled wenn kein Boden vorhanden
+            add_ground_action = ground_menu.addAction("Boden hinzufügen")
+            if not (all_have_ground and any_has_ground):
+                add_ground_action.triggered.connect(
+                    lambda: self.parent_canvas._add_ground_multiple(self.parent_canvas.selected_object_ids)
                 )
             else:
-                add_ground_action = ground_menu.addAction("Boden hinzufügen")
-                add_ground_action.triggered.connect(
-                    lambda: self.parent_canvas._add_ground(clicked_obj.get("id"))
+                add_ground_action.setEnabled(False)  # Ausgegraut wenn bereits Boden vorhanden
+            
+            # Boden entfernen - immer sichtbar, enabled wenn Boden vorhanden
+            remove_ground_action = ground_menu.addAction("Boden entfernen")
+            if all_have_ground and any_has_ground:
+                remove_ground_action.triggered.connect(
+                    lambda: self.parent_canvas._remove_ground_multiple(self.parent_canvas.selected_object_ids)
                 )
+            else:
+                remove_ground_action.setEnabled(False)  # Ausgegraut wenn kein Boden vorhanden
             
             # Menü anzeigen
             menu.exec(event.globalPos())
     
     def mouseMoveEvent(self, event):
         """Maus-Bewegung Event"""
+        # Duplizieren-Vorschau aktualisieren
+        if self.parent_canvas._duplicate_preview_mode:
+            pos = event.position().toPoint()
+            adjusted_pos = pos - self.parent_canvas.view_offset
+            zoom = self.parent_canvas.zoom_factor
+            world_x = int(adjusted_pos.x() / zoom)
+            world_y = int(adjusted_pos.y() / zoom)
+            
+            # Offset berechnen (relativ zum ersten Objekt)
+            if self.parent_canvas._duplicate_preview_objects:
+                first_obj = self.parent_canvas._duplicate_preview_objects[0]
+                start_pos = first_obj["start_pos"]
+                
+                # Delta berechnen
+                dx = world_x - start_pos.x()
+                dy = world_y - start_pos.y()
+                
+                # An Grid ausrichten
+                grid_size = self.parent_canvas.grid_size
+                grid_dx = ((dx // grid_size) * grid_size) - (dx % grid_size)
+                grid_dy = ((dy // grid_size) * grid_size) - (dy % grid_size)
+                
+                self.parent_canvas._duplicate_preview_offset = QPoint(grid_dx, grid_dy)
+                self.update()
+            return
+        
         # Panning mit mittlerer Maustaste
         if self.parent_canvas.panning:
             current_pos = event.position().toPoint()
@@ -1288,14 +1820,66 @@ class CanvasWidget(QWidget):
                 if obj.get("ground", False):
                     self._draw_ground_marker(painter, obj)
         
-        # Selektion hervorheben (nur wenn im aktiven Layer)
-        if self.parent_canvas.selected_object_id:
+        # Selektion hervorheben (Mehrfachauswahl)
+        for obj_id in self.parent_canvas.selected_object_ids:
             for obj in self.parent_canvas.objects:
-                if obj.get("id") == self.parent_canvas.selected_object_id:
+                if obj.get("id") == obj_id:
                     obj_layer = obj.get("layer", "default")
                     if obj_layer == current_layer:
                         self._draw_selection(painter, obj)
                     break
+        
+        # Duplizieren-Vorschau zeichnen
+        if self.parent_canvas._duplicate_preview_mode and self.parent_canvas._duplicate_preview_objects:
+            for preview_data in self.parent_canvas._duplicate_preview_objects:
+                obj_copy = preview_data["copy"]
+                start_pos = preview_data["start_pos"]
+                offset = self.parent_canvas._duplicate_preview_offset
+                
+                # Neue Position berechnen
+                new_x = start_pos.x() + offset.x()
+                new_y = start_pos.y() + offset.y()
+                
+                # An Grid ausrichten
+                grid_size = self.parent_canvas.grid_size
+                grid_x = (new_x // grid_size) * grid_size
+                grid_y = (new_y // grid_size) * grid_size
+                grid_x = int(grid_x)
+                grid_y = int(grid_y)
+                
+                # Vorschau-Objekt zeichnen (halbtransparent)
+                obj_copy["x"] = grid_x
+                obj_copy["y"] = grid_y
+                self._draw_object_preview(painter, obj_copy)
+                
+                # Grid-Feld hervorheben
+                self._draw_grid_highlight(painter, grid_x, grid_y, grid_size)
+        
+        # Duplizieren-Vorschau zeichnen
+        if self.parent_canvas._duplicate_preview_mode and self.parent_canvas._duplicate_preview_objects:
+            for preview_data in self.parent_canvas._duplicate_preview_objects:
+                obj_copy = preview_data["copy"]
+                start_pos = preview_data["start_pos"]
+                offset = self.parent_canvas._duplicate_preview_offset
+                
+                # Neue Position berechnen
+                new_x = start_pos.x() + offset.x()
+                new_y = start_pos.y() + offset.y()
+                
+                # An Grid ausrichten
+                grid_size = self.parent_canvas.grid_size
+                grid_x = (new_x // grid_size) * grid_size
+                grid_y = (new_y // grid_size) * grid_size
+                grid_x = int(grid_x)
+                grid_y = int(grid_y)
+                
+                # Vorschau-Objekt zeichnen (halbtransparent)
+                obj_copy["x"] = grid_x
+                obj_copy["y"] = grid_y
+                self._draw_object_preview(painter, obj_copy)
+                
+                # Grid-Feld hervorheben
+                self._draw_grid_highlight(painter, grid_x, grid_y, grid_size)
     
     def _draw_object(self, painter: QPainter, obj: Dict[str, Any]):
         """Zeichnet ein Objekt"""
@@ -1520,6 +2104,58 @@ class CanvasWidget(QWidget):
         painter.setPen(QPen(QColor(255, 255, 0), 3))
         painter.setBrush(QBrush(QColor(255, 255, 0, 50)))
         painter.drawRect(x - 2, y - 2, width + 4, height + 4)
+    
+    def _draw_object_preview(self, painter: QPainter, obj: Dict[str, Any]):
+        """Zeichnet ein Objekt als Vorschau (halbtransparent)"""
+        x = int(obj.get("x", 0))
+        y = int(obj.get("y", 0))
+        width = int(obj.get("width", 32))
+        height = int(obj.get("height", 32))
+        
+        sprite_path = obj.get("sprite")
+        if sprite_path and self.parent_canvas.project_path:
+            try:
+                sprite_path_obj = Path(sprite_path)
+                if sprite_path_obj.is_absolute():
+                    full_path = sprite_path_obj
+                else:
+                    full_path = self.parent_canvas.project_path / sprite_path
+                
+                cache_key = str(sprite_path).replace("\\", "/")
+                
+                if full_path.exists() and full_path.is_file():
+                    if cache_key not in self.sprite_cache:
+                        pixmap = QPixmap(str(full_path))
+                        if not pixmap.isNull():
+                            target_size = self.parent_canvas.grid_size
+                            pixmap = pixmap.scaled(target_size, target_size, 
+                                                 Qt.AspectRatioMode.IgnoreAspectRatio,
+                                                 Qt.TransformationMode.SmoothTransformation)
+                            self.sprite_cache[cache_key] = pixmap
+                    
+                    if cache_key in self.sprite_cache:
+                        # Halbtransparentes Pixmap zeichnen
+                        pixmap = self.sprite_cache[cache_key]
+                        painter.setOpacity(0.5)  # 50% Transparenz
+                        painter.drawPixmap(x, y, width, height, pixmap)
+                        painter.setOpacity(1.0)  # Zurücksetzen
+                        return
+            except Exception:
+                pass
+        
+        # Fallback: Halbtransparentes Rechteck
+        painter.setOpacity(0.5)
+        painter.setPen(QPen(QColor(200, 200, 200), 2))
+        painter.setBrush(QBrush(QColor(200, 200, 200, 100)))
+        painter.drawRect(x, y, width, height)
+        painter.setOpacity(1.0)
+    
+    def _draw_grid_highlight(self, painter: QPainter, grid_x: int, grid_y: int, grid_size: int):
+        """Zeichnet eine Hervorhebung für ein Grid-Feld"""
+        # Grüne Umrandung für Grid-Feld
+        painter.setPen(QPen(QColor(0, 255, 0), 2))  # Grün
+        painter.setBrush(QBrush(QColor(0, 255, 0, 30)))  # Leicht transparentes Grün
+        painter.drawRect(grid_x, grid_y, grid_size, grid_size)
     
     def _draw_grid(self, painter: QPainter):
         """Zeichnet ein Raster (einstellbare Größe)"""

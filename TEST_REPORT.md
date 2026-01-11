@@ -2,7 +2,7 @@
 
 **Datum:** Heute  
 **Projekt:** Test_Project  
-**Status:** Systematische Überprüfung abgeschlossen
+**Status:** ⚠️ **VERALTET** - Dieser Bericht ist nicht mehr aktuell. Siehe `BUGS.md` für aktuelle Probleme.
 
 ---
 

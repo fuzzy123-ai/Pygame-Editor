@@ -28,8 +28,9 @@ pip install -r requirements.txt
 ### Schritt 2: Editor starten
 
 **Windows:**
-- Doppelklick auf `start_editor.bat`
-- Oder in der Kommandozeile:
+- **Empfohlen:** Doppelklick auf `start_editor_direct.bat` (startet direkt ohne Dialog)
+- **Mit Prüfung:** Doppelklick auf `start_editor.bat` (prüft Requirements)
+- **Oder in der Kommandozeile:**
   ```bash
   python -m game_editor.editor
   ```
