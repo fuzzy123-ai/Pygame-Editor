@@ -1,0 +1,32 @@
+{
+  "name": "Level 1",
+  "background_color": [135, 206, 235],
+  "objects": [
+    {
+      "id": "player",
+      "type": "sprite",
+      "sprite": "assets/images/player.png",
+      "x": 100,
+      "y": 300,
+      "width": 32,
+      "height": 48,
+      "collider": {
+        "enabled": true,
+        "type": "rect"
+      }
+    },
+    {
+      "id": "enemy1",
+      "type": "sprite",
+      "sprite": "assets/images/enemy.png",
+      "x": 400,
+      "y": 300,
+      "width": 32,
+      "height": 32,
+      "collider": {
+        "enabled": true,
+        "type": "rect"
+      }
+    }
+  ]
+}

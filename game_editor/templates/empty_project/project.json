@@ -1,0 +1,10 @@
+{
+  "name": "Mein erstes Spiel",
+  "version": "1.0",
+  "start_scene": "level1",
+  "window": {
+    "width": 800,
+    "height": 600,
+    "title": "Mein Spiel"
+  }
+}

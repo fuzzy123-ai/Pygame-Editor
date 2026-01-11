@@ -1,0 +1,10 @@
+# Sprites Ordner
+# 
+# Legen Sie hier alle Ihre Sprites/Bilder ab.
+# Im Asset Browser können Sie dann auf "Sprites organisieren" klicken,
+# um sie automatisch in assets/images/ zu sortieren.
+#
+# Sortier-Strategien:
+# - Nach Größe: small (≤32px), medium (≤64px), large (>64px)
+# - Nach Name: z.B. "player_idle.png" -> player/
+# - Alle zusammen: Alle in assets/images/

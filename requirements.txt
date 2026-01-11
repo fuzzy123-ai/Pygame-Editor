@@ -1,0 +1,16 @@
+# GameDev-Edu Requirements
+# Python 3.10+
+
+# Game Runtime
+# pygame>=2.5.0  # Falls pygame nicht funktioniert, verwende pygame-ce:
+pygame-ce>=2.5.0  # Alternative für Python 3.14+
+
+# Sprite Organization (optional, aber empfohlen)
+Pillow>=10.0.0  # Für Bildgrößen-Prüfung beim Sortieren
+
+# Editor GUI
+PySide6>=6.5.0
+
+# QScintilla (optional, aber empfohlen für Syntax-Highlighting)
+# Falls nicht verfügbar: pip install PySide6-QScintilla
+# oder manuell: https://www.riverbankcomputing.com/software/qscintilla/download

@@ -1,0 +1,1241 @@
+"""
+Scene Canvas - 2D Canvas für Objekte mit Drag & Drop, Zoom, Game Preview
+"""
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QHBoxLayout, 
+                                QPushButton, QSlider, QComboBox)
+from PySide6.QtCore import Qt, Signal, QPoint, QRect, QTimer
+from PySide6.QtGui import QPainter, QPaintEvent, QColor, QPen, QBrush, QPixmap, QImage, QWheelEvent
+from pathlib import Path
+import json
+from typing import Optional, Dict, Any, List
+
+
+class SceneCanvas(QWidget):
+    """2D Canvas für Szenen-Editierung"""
+    
+    object_selected = Signal(dict)  # Signal wenn Objekt ausgewählt wird
+    undo_redo_changed = Signal()  # Signal wenn Undo/Redo-Status sich ändert
+    
+    def __init__(self):
+        super().__init__()
+        self.project_path: Optional[Path] = None
+        self.scene_data: Dict[str, Any] = {}
+        self.objects: List[Dict[str, Any]] = []
+        self.selected_object_id: Optional[str] = None
+        self.undo_redo_manager = None  # Wird vom main_window gesetzt
+        self._last_move_positions = {}  # Speichert letzte Positionen für Move-Commands
+        
+        # Zoom
+        self.zoom_factor = 1.0
+        self.min_zoom = 0.5
+        self.max_zoom = 2.0
+        
+        # Grid (wird aus Projekt-Einstellungen geladen)
+        self.grid_size = 16  # Standard-Grid-Größe
+        self.grid_color = QColor(200, 200, 200, 120)  # Standard-Grid-Farbe
+        
+        # Panning (mit mittlerer Maustaste)
+        self.panning = False
+        self.pan_start_pos = QPoint()
+        self.view_offset = QPoint(0, 0)  # Offset für Panning
+        
+        # Drag & Drop
+        self.dragging = False
+        self.drag_start_pos = QPoint()
+        self.drag_object_id: Optional[str] = None
+        
+        # Game Preview
+        self.preview_mode = False
+        # self.preview_surface: Optional[pygame.Surface] = None  # Wird später implementiert
+        
+        # Layer-System
+        self.current_layer = "default"  # Aktuell gewählter Layer
+        self.available_layers = ["background", "default", "foreground"]  # Verfügbare Layer
+        
+        # Anzeige-Optionen
+        self.show_labels = True  # Namen/IDs anzeigen
+        self.show_highlights = True  # Hervorhebungen anzeigen
+        
+        self._init_ui()
+    
+    def _init_ui(self):
+        """Initialisiert die UI"""
+        # Dark-Mode für Scene Canvas
+        self.setStyleSheet("""
+            QWidget {
+                background-color: #1e1e1e;
+                color: #d4d4d4;
+            }
+        """)
+        
+        layout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Werkzeugleiste (für spätere Map-Editier-Funktionen) - Dark-Mode
+        tool_toolbar = QHBoxLayout()
+        tool_toolbar.setContentsMargins(5, 5, 5, 5)
+        
+        title = QLabel("Scene Canvas")
+        title.setStyleSheet("font-weight: bold; padding: 5px; color: #d4d4d4;")
+        tool_toolbar.addWidget(title)
+        
+        tool_toolbar.addStretch()
+        
+        # Layer-Auswahl (Dark-Mode)
+        layer_label = QLabel("Layer:")
+        layer_label.setStyleSheet("font-size: 10pt; padding: 5px; color: #d4d4d4;")
+        tool_toolbar.addWidget(layer_label)
+        
+        self.layer_combo = QComboBox()
+        self.layer_combo.addItems(self.available_layers)
+        self.layer_combo.setCurrentText(self.current_layer)
+        self.layer_combo.currentTextChanged.connect(self._on_layer_changed)
+        self.layer_combo.setStyleSheet("""
+            QComboBox {
+                padding: 3px;
+                font-weight: bold;
+                background-color: #4a9eff;
+                color: white;
+                border: 2px solid #3a8eef;
+                border-radius: 3px;
+            }
+            QComboBox:hover {
+                background-color: #5aaeff;
+            }
+            QComboBox::drop-down {
+                border: none;
+                background-color: #3a8eef;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #2d2d2d;
+                color: #d4d4d4;
+                selection-background-color: #4a9eff;
+            }
+        """)
+        tool_toolbar.addWidget(self.layer_combo)
+        
+        tool_toolbar.addStretch()
+        
+        # Platzhalter für zukünftige Tools
+        # TODO: Hier kommen später Map-Editier-Tools rein
+        
+        layout.addLayout(tool_toolbar)
+        
+        # Canvas mit Zoom-Controls oben rechts
+        canvas_container = QWidget()
+        canvas_layout = QVBoxLayout()
+        canvas_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Zoom-Controls oben rechts (klein, in der Ecke)
+        zoom_container = QWidget()
+        zoom_container.setFixedSize(220, 30)  # Breiter für größeren Slider
+        zoom_layout = QHBoxLayout()
+        zoom_layout.setContentsMargins(5, 0, 5, 0)
+        zoom_layout.setSpacing(5)
+        
+        zoom_label = QLabel("Zoom:")
+        zoom_label.setStyleSheet("font-size: 10pt; color: #d4d4d4;")
+        zoom_layout.addWidget(zoom_label)
+        
+        self.zoom_slider = QSlider(Qt.Horizontal)
+        self.zoom_slider.setMinimum(50)  # 0.5
+        self.zoom_slider.setMaximum(200)  # 2.0
+        self.zoom_slider.setValue(100)  # 1.0
+        self.zoom_slider.setFixedWidth(120)  # Breiter gemacht
+        self.zoom_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                background-color: #2d2d2d;
+                height: 6px;
+                border-radius: 3px;
+                border: 1px solid #3d3d3d;
+            }
+            QSlider::sub-page:horizontal {
+                background-color: #4a9eff;
+                height: 6px;
+                border-radius: 3px;
+            }
+            QSlider::handle:horizontal {
+                background-color: #4a9eff;
+                width: 16px;
+                height: 16px;
+                margin: -5px 0;
+                border-radius: 8px;
+                border: 2px solid #3a8eef;
+            }
+            QSlider::handle:horizontal:hover {
+                background-color: #5aaeff;
+                border-color: #4a9eff;
+            }
+            QSlider::handle:horizontal:pressed {
+                background-color: #3a8eef;
+                border-color: #2a7eef;
+            }
+        """)
+        self.zoom_slider.valueChanged.connect(self._on_zoom_changed)
+        zoom_layout.addWidget(self.zoom_slider)
+        
+        zoom_value_label = QLabel("100%")
+        zoom_value_label.setMinimumWidth(40)
+        zoom_value_label.setStyleSheet("font-size: 10pt; color: #d4d4d4;")
+        self.zoom_value_label = zoom_value_label
+        zoom_layout.addWidget(zoom_value_label)
+        
+        # Augen-Symbol Button für Labels/Highlights Toggle
+        from PySide6.QtWidgets import QToolButton
+        self.toggle_labels_button = QToolButton()
+        self.toggle_labels_button.setText("👁")  # Augen-Symbol
+        self.toggle_labels_button.setToolTip("Namen und Hervorhebungen ein/aus")
+        self.toggle_labels_button.setCheckable(True)
+        self.toggle_labels_button.setChecked(True)  # Standard: an
+        self.toggle_labels_button.setStyleSheet("""
+            QToolButton {
+                font-size: 14pt;
+                padding: 3px;
+                border: 1px solid #ccc;
+                border-radius: 3px;
+                background-color: #f0f0f0;
+            }
+            QToolButton:checked {
+                background-color: #4a9eff;
+                color: white;
+            }
+            QToolButton:hover {
+                background-color: #e0e0e0;
+            }
+            QToolButton:checked:hover {
+                background-color: #5aaeff;
+            }
+        """)
+        self.toggle_labels_button.toggled.connect(self._on_toggle_labels)
+        zoom_layout.addWidget(self.toggle_labels_button)
+        
+        zoom_container.setLayout(zoom_layout)
+        
+        # Canvas-Widget
+        self.canvas = CanvasWidget(self)
+        
+        # Overlay-Layout für Zoom-Controls oben rechts
+        overlay_layout = QVBoxLayout()
+        overlay_layout.setContentsMargins(0, 0, 0, 0)
+        overlay_layout.addWidget(self.canvas, 1)
+        
+        # Zoom-Controls oben rechts positionieren
+        canvas_wrapper = QWidget()
+        canvas_wrapper.setLayout(overlay_layout)
+        
+        # Zoom-Container oben rechts
+        zoom_wrapper = QWidget(canvas_wrapper)
+        zoom_wrapper.setLayout(QVBoxLayout())
+        zoom_wrapper.layout().setContentsMargins(0, 0, 0, 0)
+        zoom_wrapper.layout().addWidget(zoom_container)
+        zoom_wrapper.layout().addStretch()
+        zoom_wrapper.setGeometry(0, 0, 220, 30)  # Breiter für größeren Slider
+        zoom_wrapper.setStyleSheet("background-color: rgba(30, 30, 30, 220); border-radius: 5px; border: 1px solid #3d3d3d;")  # Dark-Mode Hintergrund
+        
+        canvas_layout.addWidget(canvas_wrapper, 1)
+        canvas_container.setLayout(canvas_layout)
+        
+        layout.addWidget(canvas_container, 1)  # Mehr Platz für Canvas
+        
+        self.setLayout(layout)
+        
+        # Canvas-Events verbinden
+        self.canvas.mouse_pressed.connect(self._on_mouse_pressed)
+        self.canvas.mouse_moved.connect(self._on_mouse_moved)
+        self.canvas.mouse_released.connect(self._on_mouse_released)
+    
+    def load_project(self, project_path: Path):
+        """Lädt Projekt und Szene"""
+        self.project_path = project_path
+        self._load_grid_settings()
+        self._load_scene()
+    
+    def _load_grid_settings(self):
+        """Lädt Grid-Einstellungen aus project.json"""
+        if not self.project_path:
+            return
+        
+        project_file = self.project_path / "project.json"
+        if project_file.exists():
+            try:
+                with open(project_file, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                
+                # Grid-Größe = Sprite-Größe (quadratisch)
+                sprite_size = config.get("sprite_size", 64)
+                # Alte Format-Unterstützung (width/height)
+                if isinstance(sprite_size, dict):
+                    self.grid_size = sprite_size.get("width", sprite_size.get("size", 64))
+                else:
+                    # Neues Format (nur eine Zahl)
+                    self.grid_size = sprite_size if isinstance(sprite_size, int) else 64
+                
+                # Grid-Farbe laden
+                grid_settings = config.get("grid", {})
+                grid_color = grid_settings.get("color", [200, 200, 200, 120])
+                if isinstance(grid_color, list) and len(grid_color) >= 3:
+                    alpha = grid_color[3] if len(grid_color) >= 4 else 120
+                    self.grid_color = QColor(grid_color[0], grid_color[1], grid_color[2], alpha)
+                else:
+                    self.grid_color = QColor(200, 200, 200, 120)
+            except Exception:
+                pass  # Standard-Werte beibehalten
+    
+    def _cleanup_duplicate_ids_and_names(self):
+        """Bereinigt doppelte IDs und Namen in der Objekt-Liste"""
+        seen_ids = set()
+        seen_names = set()
+        duplicate_fixed = False
+        
+        # Erster Durchlauf: Alle IDs sammeln und doppelte finden
+        for obj in self.objects:
+            obj_id = obj.get("id")
+            
+            # Doppelte oder fehlende ID reparieren
+            if not obj_id or obj_id in seen_ids:
+                # Neue eindeutige ID generieren
+                base_id = obj_id if obj_id and obj_id.startswith("object_") else None
+                if not base_id:
+                    base_id = f"object_{len(self.objects)}"
+                
+                counter = 1
+                new_id = base_id
+                while new_id in seen_ids:
+                    new_id = f"object_{len(self.objects) + counter}"
+                    counter += 1
+                
+                old_id = obj_id or "fehlend"
+                obj["id"] = new_id
+                seen_ids.add(new_id)
+                duplicate_fixed = True
+                print(f"[Canvas] Doppelte ID repariert: {old_id} -> {new_id}")
+            else:
+                seen_ids.add(obj_id)
+        
+        # Zweiter Durchlauf: Namen bereinigen
+        for obj in self.objects:
+            obj_name = obj.get("name", "")
+            
+            # Doppelte Namen reparieren (nur wenn Name gesetzt ist)
+            if obj_name and obj_name.strip():
+                if obj_name in seen_names:
+                    # Namen mit Nummer versehen
+                    base_name = obj_name
+                    counter = 1
+                    unique_name = obj_name
+                    while unique_name in seen_names:
+                        unique_name = f"{base_name}_{counter}"
+                        counter += 1
+                    obj["name"] = unique_name
+                    seen_names.add(unique_name)
+                    duplicate_fixed = True
+                    print(f"[Canvas] Doppelter Name repariert: {base_name} -> {unique_name}")
+                else:
+                    seen_names.add(obj_name)
+        
+        if duplicate_fixed:
+            print(f"[Canvas] Duplikate bereinigt - {len(self.objects)} Objekte, {len(seen_ids)} eindeutige IDs")
+    
+    def _load_scene(self):
+        """Lädt die aktuelle Szene"""
+        if not self.project_path:
+            return
+        
+        # Projekt-Konfiguration laden
+        project_file = self.project_path / "project.json"
+        if not project_file.exists():
+            return
+        
+        with open(project_file, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        
+        start_scene = config.get("start_scene", "level1")
+        
+        # Szene laden
+        scene_file = self.project_path / "scenes" / f"{start_scene}.json"
+        if not scene_file.exists():
+            # Leere Szene erstellen
+            self.scene_data = {
+                "name": "Level 1",
+                "background_color": [135, 206, 235],
+                "objects": []
+            }
+        else:
+            with open(scene_file, 'r', encoding='utf-8') as f:
+                self.scene_data = json.load(f)
+        
+        self.objects = self.scene_data.get("objects", [])
+        
+        # Doppelte IDs und Namen bereinigen
+        self._cleanup_duplicate_ids_and_names()
+        
+        # Objekte auf Grid-Größe anpassen (wenn nicht bereits korrekt)
+        for obj in self.objects:
+            # Objekt-Größe = Grid-Größe setzen
+            obj["width"] = self.grid_size
+            obj["height"] = self.grid_size
+            
+            # Position an Grid ausrichten
+            obj["x"] = (obj.get("x", 0) // self.grid_size) * self.grid_size
+            obj["y"] = (obj.get("y", 0) // self.grid_size) * self.grid_size
+            
+            # Layer-Information hinzufügen falls nicht vorhanden (für Rückwärtskompatibilität)
+            if "layer" not in obj:
+                obj["layer"] = "default"
+        
+        # Szene speichern mit aktualisierten Größen und bereinigten Duplikaten
+        self.save_scene()
+        
+        # Sprite-Cache leeren beim Laden
+        if self.canvas:
+            self.canvas.sprite_cache.clear()
+        self.canvas.update()
+        # Selektion zurücksetzen
+        self.selected_object_id = None
+    
+    def save_scene(self):
+        """Speichert die aktuelle Szene"""
+        if not self.project_path:
+            return
+        
+        # Projekt-Konfiguration laden
+        project_file = self.project_path / "project.json"
+        if not project_file.exists():
+            return
+        
+        with open(project_file, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        
+        start_scene = config.get("start_scene", "level1")
+        
+        # Alle Sprite-Pfade zu relativen Pfaden konvertieren
+        objects_to_save = []
+        for obj in self.objects:
+            obj_copy = obj.copy()
+            sprite_path = obj_copy.get("sprite")
+            if sprite_path:
+                try:
+                    sprite_path_obj = Path(sprite_path)
+                    if sprite_path_obj.is_absolute():
+                        # Versuchen relativ zum Projekt-Ordner zu machen
+                        try:
+                            rel_path = sprite_path_obj.relative_to(self.project_path)
+                            obj_copy["sprite"] = str(rel_path).replace("\\", "/")
+                        except ValueError:
+                            # Pfad liegt außerhalb des Projekts - behalten wie es ist
+                            pass
+                    else:
+                        # Bereits relativ - sicherstellen dass Pfad-Separatoren korrekt sind
+                        obj_copy["sprite"] = sprite_path.replace("\\", "/")
+                except Exception:
+                    # Bei Fehler Pfad behalten wie er ist
+                    pass
+            objects_to_save.append(obj_copy)
+        
+        # Szene speichern
+        scene_file = self.project_path / "scenes" / f"{start_scene}.json"
+        scene_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        scene_data_to_save = self.scene_data.copy()
+        scene_data_to_save["objects"] = objects_to_save
+        
+        with open(scene_file, 'w', encoding='utf-8') as f:
+            json.dump(scene_data_to_save, f, indent=2, ensure_ascii=False)
+    
+    def _on_zoom_changed(self, value: int):
+        """Wird aufgerufen wenn Zoom geändert wird"""
+        self.zoom_factor = value / 100.0
+        self.zoom_value_label.setText(f"{value}%")
+        self.canvas.update()
+    
+    def _on_layer_changed(self, layer_name: str):
+        """Wird aufgerufen wenn Layer geändert wird"""
+        self.current_layer = layer_name
+        # Selektion zurücksetzen wenn Objekt nicht im aktiven Layer ist
+        if self.selected_object_id:
+            selected_obj = next((obj for obj in self.objects if obj.get("id") == self.selected_object_id), None)
+            if selected_obj and selected_obj.get("layer", "default") != self.current_layer:
+                self.selected_object_id = None
+                self.object_selected.emit({})
+        # Canvas aktualisieren
+        self.canvas.update()
+    
+    def _on_toggle_labels(self, checked: bool):
+        """Wird aufgerufen wenn Labels/Highlights Toggle geändert wird"""
+        self.show_labels = checked
+        self.show_highlights = checked
+        self.canvas.update()
+    
+    
+    def _on_mouse_pressed(self, pos: QPoint):
+        """Wird aufgerufen wenn Maus gedrückt wird"""
+        # Canvas-Koordinaten in World-Koordinaten umrechnen
+        # Panning-Offset berücksichtigen
+        adjusted_pos = pos - self.view_offset
+        # Zoom-Faktor anwenden
+        world_x = int(adjusted_pos.x() / self.zoom_factor)
+        world_y = int(adjusted_pos.y() / self.zoom_factor)
+        
+        # Objekt finden das angeklickt wurde
+        # Zuerst Objekte des aktiven Layers prüfen, dann andere Layer
+        clicked_obj = None
+        
+        # Phase 1: Objekte des aktiven Layers (prioritär)
+        for obj in reversed(self.objects):  # Von hinten nach vorne
+            obj_layer = obj.get("layer", "default")
+            if obj_layer != self.current_layer:
+                continue
+                
+            # Prüfen ob Klick innerhalb der Objekt-Grenzen liegt
+            obj_x = int(obj.get("x", 0))
+            obj_y = int(obj.get("y", 0))
+            obj_width = int(obj.get("width", 32))
+            obj_height = int(obj.get("height", 32))
+            
+            # Toleranz für Klickerkennung (ein paar Pixel) - macht Klicken einfacher
+            tolerance = 2
+            if (obj_x - tolerance <= world_x < obj_x + obj_width + tolerance and
+                obj_y - tolerance <= world_y < obj_y + obj_height + tolerance):
+                clicked_obj = obj
+                break
+        
+        # Phase 2: Falls kein Objekt im aktiven Layer gefunden, andere Layer prüfen
+        if clicked_obj is None:
+            for obj in reversed(self.objects):  # Von hinten nach vorne
+                obj_layer = obj.get("layer", "default")
+                if obj_layer == self.current_layer:
+                    continue  # Bereits geprüft
+                    
+                # Prüfen ob Klick innerhalb der Objekt-Grenzen liegt
+                obj_x = int(obj.get("x", 0))
+                obj_y = int(obj.get("y", 0))
+                obj_width = int(obj.get("width", 32))
+                obj_height = int(obj.get("height", 32))
+                
+                # Toleranz für Klickerkennung
+                tolerance = 2
+                if (obj_x - tolerance <= world_x < obj_x + obj_width + tolerance and
+                    obj_y - tolerance <= world_y < obj_y + obj_height + tolerance):
+                    clicked_obj = obj
+                    # Layer wechseln zum gefundenen Objekt
+                    if obj_layer in self.available_layers:
+                        self.current_layer = obj_layer
+                        self.layer_combo.setCurrentText(obj_layer)
+                    break
+        
+        if clicked_obj:
+            self.selected_object_id = clicked_obj.get("id")
+            self.dragging = True
+            self.drag_start_pos = pos
+            self.drag_object_id = clicked_obj.get("id")
+            # Drag-Start-Positionen speichern (World-Koordinaten und Canvas-Koordinaten)
+            self._drag_start_world_pos = QPoint(clicked_obj.get("x", 0), clicked_obj.get("y", 0))
+            self._drag_start_canvas_pos = pos  # Rohe Canvas-Position für Delta-Berechnung
+            self.object_selected.emit(clicked_obj)
+        else:
+            # Kein Objekt angeklickt - Auswahl zurücksetzen
+            self.selected_object_id = None
+            self.dragging = False
+            self.drag_object_id = None
+            self.object_selected.emit({})  # Leeres Dictionary = keine Auswahl
+            # Drag-Start-Positionen löschen
+            if hasattr(self, '_drag_start_world_pos'):
+                delattr(self, '_drag_start_world_pos')
+            if hasattr(self, '_drag_start_canvas_pos'):
+                delattr(self, '_drag_start_canvas_pos')
+        
+        self.canvas.update()
+    
+    def _on_mouse_moved(self, pos: QPoint):
+        """Wird aufgerufen wenn Maus bewegt wird"""
+        if self.dragging and self.drag_object_id:
+            # Objekt finden und Position direkt setzen (nur aktiver Layer)
+            for obj in self.objects:
+                # Nur Objekte des aktiven Layers können bewegt werden
+                obj_layer = obj.get("layer", "default")
+                if obj_layer != self.current_layer:
+                    continue
+                    
+                if obj.get("id") == self.drag_object_id:
+                    # Sicherstellen dass Start-Positionen gesetzt sind
+                    if not hasattr(self, '_drag_start_world_pos') or not hasattr(self, '_drag_start_canvas_pos'):
+                        self._drag_start_world_pos = QPoint(obj.get("x", 0), obj.get("y", 0))
+                        self._drag_start_canvas_pos = pos
+                    
+                    # Delta in Canvas-Koordinaten berechnen (rohe Pixel-Differenz)
+                    canvas_dx = pos.x() - self._drag_start_canvas_pos.x()
+                    canvas_dy = pos.y() - self._drag_start_canvas_pos.y()
+                    
+                    # Delta in World-Koordinaten umrechnen (Zoom berücksichtigen)
+                    # View-Offset muss nicht berücksichtigt werden, da beide Positionen
+                    # relativ zum Canvas sind und der Offset sich rauskürzt
+                    dx = int(canvas_dx / self.zoom_factor)
+                    dy = int(canvas_dy / self.zoom_factor)
+                    
+                    # Neue Position berechnen (basierend auf ursprünglicher World-Position)
+                    new_x = self._drag_start_world_pos.x() + dx
+                    new_y = self._drag_start_world_pos.y() + dy
+                    
+                    # An Grid ausrichten (Grid-Position) - sicherstellen dass Position eindeutig ist
+                    grid_x = (new_x // self.grid_size) * self.grid_size
+                    grid_y = (new_y // self.grid_size) * self.grid_size
+                    
+                    # Sicherstellen dass Position genau auf Grid ist (keine Rundungsfehler)
+                    grid_x = int(grid_x)
+                    grid_y = int(grid_y)
+                    
+                    # Prüfen ob bereits ein anderes Objekt an dieser Grid-Position existiert
+                    grid_cell_x = grid_x // self.grid_size
+                    grid_cell_y = grid_y // self.grid_size
+                    position_free = True
+                    for other_obj in self.objects:
+                        if other_obj.get("id") == obj.get("id"):
+                            continue  # Ignoriere das aktuelle Objekt
+                        other_layer = other_obj.get("layer", "default")
+                        if other_layer != self.current_layer:
+                            continue  # Nur Objekte im selben Layer prüfen
+                        other_x = other_obj.get("x", 0)
+                        other_y = other_obj.get("y", 0)
+                        other_grid_x = other_x // self.grid_size
+                        other_grid_y = other_y // self.grid_size
+                        if other_grid_x == grid_cell_x and other_grid_y == grid_cell_y:
+                            position_free = False
+                            break
+                    
+                    # Alte Position für Kollisionsbox-Berechnung
+                    old_x = obj.get("x", 0)
+                    old_y = obj.get("y", 0)
+                    
+                    # Nur bewegen wenn Position frei ist
+                    if position_free:
+                        obj["x"] = grid_x
+                        obj["y"] = grid_y
+                    
+                    # Objekt-Größe = Grid-Größe sicherstellen
+                    obj["width"] = self.grid_size
+                    obj["height"] = self.grid_size
+                    
+                    # Kollisionsbox mitbewegen (Offset beibehalten)
+                    collider_data = obj.get("collider", {})
+                    if collider_data.get("enabled", False):
+                        # Delta berechnen
+                        delta_x = grid_x - old_x
+                        delta_y = grid_y - old_y
+                        
+                        # Absolute Position der Kollisionsbox aktualisieren
+                        if "x" in collider_data:
+                            collider_data["x"] = collider_data.get("x", old_x) + delta_x
+                        if "y" in collider_data:
+                            collider_data["y"] = collider_data.get("y", old_y) + delta_y
+                    
+                    # Signal für Inspector
+                    self.object_selected.emit(obj)
+                    break
+            
+            self.canvas.update()
+    
+    def set_undo_redo_manager(self, manager):
+        """Setzt den Undo/Redo-Manager"""
+        self.undo_redo_manager = manager
+    
+    def _on_mouse_released(self, pos: QPoint):
+        """Wird aufgerufen wenn Maus losgelassen wird"""
+        if self.dragging and self.drag_object_id and self.undo_redo_manager:
+            # Objekt finden und Move-Command erstellen
+            for obj in self.objects:
+                if obj.get("id") == self.drag_object_id:
+                    # Alte Position aus _drag_start_world_pos holen
+                    if hasattr(self, '_drag_start_world_pos'):
+                        old_x = self._drag_start_world_pos.x()
+                        old_y = self._drag_start_world_pos.y()
+                    else:
+                        # Fallback: Aus _last_move_positions
+                        old_pos = self._last_move_positions.get(self.drag_object_id, (obj.get("x", 0), obj.get("y", 0)))
+                        old_x, old_y = old_pos
+                    
+                    new_x = obj.get("x", 0)
+                    new_y = obj.get("y", 0)
+                    
+                    # Nur Command erstellen wenn Position sich geändert hat
+                    if old_x != new_x or old_y != new_y:
+                        from ..utils.commands import ObjectMoveCommand
+                        
+                        command = ObjectMoveCommand(
+                            obj,
+                            old_x,
+                            old_y,
+                            new_x,
+                            new_y,
+                            lambda: (self.canvas.update(), self.save_scene())
+                        )
+                        self.undo_redo_manager.execute_command(command)
+                        self.undo_redo_changed.emit()  # Signal für Button-Update
+                    
+                    # Letzte Position speichern
+                    self._last_move_positions[self.drag_object_id] = (new_x, new_y)
+                    break
+            
+            self.save_scene()  # Auto-Save nach Drag
+        
+        self.dragging = False
+        self.drag_object_id = None
+        # Drag-Start-Positionen löschen
+        if hasattr(self, '_drag_start_world_pos'):
+            delattr(self, '_drag_start_world_pos')
+        if hasattr(self, '_drag_start_canvas_pos'):
+            delattr(self, '_drag_start_canvas_pos')
+    
+    def _generate_unique_id(self) -> str:
+        """Generiert eine eindeutige Objekt-ID"""
+        existing_ids = {obj.get("id") for obj in self.objects if obj.get("id")}
+        base_id = f"object_{len(self.objects) + 1}"
+        obj_id = base_id
+        counter = 1
+        while obj_id in existing_ids:
+            obj_id = f"object_{len(self.objects) + 1 + counter}"
+            counter += 1
+        return obj_id
+    
+    def _generate_unique_name(self, desired_name: str = "") -> str:
+        """Generiert einen eindeutigen Namen (falls Name gewünscht)"""
+        if not desired_name or not desired_name.strip():
+            return ""  # Kein Name gewünscht
+        
+        existing_names = {obj.get("name", "") for obj in self.objects if obj.get("name")}
+        base_name = desired_name.strip()
+        unique_name = base_name
+        counter = 1
+        while unique_name in existing_names:
+            unique_name = f"{base_name}_{counter}"
+            counter += 1
+        return unique_name
+    
+    def add_object_from_sprite(self, sprite_path: str, x: int, y: int):
+        """Fügt ein neues Objekt aus einem Sprite hinzu"""
+        # Neue eindeutige ID generieren
+        obj_id = self._generate_unique_id()
+        
+        # Objekt-Größe = Grid-Größe (quadratisch)
+        obj_size = self.grid_size
+        
+        # Sprite-Pfad normalisieren (absolut → relativ)
+        normalized_sprite_path = sprite_path
+        if self.project_path:
+            try:
+                sprite_path_obj = Path(sprite_path)
+                if sprite_path_obj.is_absolute():
+                    # Versuchen relativ zum Projekt-Ordner zu machen
+                    try:
+                        rel_path = sprite_path_obj.relative_to(self.project_path)
+                        normalized_sprite_path = str(rel_path).replace("\\", "/")
+                    except ValueError:
+                        # Pfad liegt außerhalb des Projekts - behalten wie es ist
+                        normalized_sprite_path = sprite_path
+                else:
+                    # Bereits relativ - sicherstellen dass Pfad-Separatoren korrekt sind
+                    normalized_sprite_path = sprite_path.replace("\\", "/")
+            except Exception:
+                # Bei Fehler Pfad behalten wie er ist
+                normalized_sprite_path = sprite_path
+        
+        new_obj = {
+            "id": obj_id,
+            "type": "sprite",
+            "sprite": normalized_sprite_path,
+            "x": x,
+            "y": y,
+            "width": obj_size,
+            "height": obj_size,
+            "layer": self.current_layer,  # Layer-Information hinzufügen
+            "collider": {
+                "enabled": True,
+                "type": "rect"
+            },
+            "ground": False  # Standard: kein Ground
+        }
+        
+        # Prüfen ob bereits ein Objekt an dieser Grid-Position existiert
+        # Nur wenn es im selben Layer ist, verhindern wir doppelte Platzierung
+        grid_x = x // self.grid_size
+        grid_y = y // self.grid_size
+        for existing_obj in self.objects:
+            existing_grid_x = existing_obj.get("x", 0) // self.grid_size
+            existing_grid_y = existing_obj.get("y", 0) // self.grid_size
+            existing_layer = existing_obj.get("layer", "default")
+            if (existing_grid_x == grid_x and existing_grid_y == grid_y and 
+                existing_layer == self.current_layer):
+                # Objekt existiert bereits an dieser Position im selben Layer
+                # Erlaube aber Objekte in anderen Layern an derselben Position
+                print(f"[Canvas] Objekt bereits vorhanden an Grid ({grid_x}, {grid_y}) im Layer {self.current_layer}")
+                return
+        
+        self.objects.append(new_obj)
+        
+        # Undo/Redo-Command erstellen
+        if self.undo_redo_manager:
+            from ..utils.commands import ObjectAddCommand
+            command = ObjectAddCommand(
+                self.objects,
+                new_obj,
+                lambda: self.canvas.update()
+            )
+            self.undo_redo_manager.execute_command(command)
+            self.undo_redo_changed.emit()  # Signal für Button-Update
+        
+        # Canvas sofort aktualisieren
+        self.canvas.update()
+        
+        self.save_scene()
+        
+        # Neues Objekt auswählen, damit es sofort bewegt werden kann
+        self.selected_object_id = obj_id
+        # Signal sofort senden - Canvas ist bereits aktualisiert
+        self.object_selected.emit(new_obj)
+        # Canvas nochmal aktualisieren um Selektion anzuzeigen
+        self.canvas.update()
+    
+    def add_empty_object(self):
+        """Fügt ein neues leeres Objekt hinzu (ohne Sprite)"""
+        # Neue eindeutige ID generieren
+        obj_id = self._generate_unique_id()
+        
+        # Objekt-Größe = Grid-Größe (quadratisch)
+        obj_size = self.grid_size
+        
+        # Standard-Position (0, 0) - kann später verschoben werden
+        grid_x = 0
+        grid_y = 0
+        
+        new_obj = {
+            "id": obj_id,
+            "type": "empty",
+            "sprite": None,  # Kein Sprite
+            "x": grid_x,
+            "y": grid_y,
+            "width": obj_size,
+            "height": obj_size,
+            "layer": self.current_layer,
+            "collider": {
+                "enabled": True,
+                "type": "rect"
+            },
+            "ground": False,  # Standard: kein Ground
+            "code": ""  # Leerer Code für neues Objekt
+        }
+        
+        self.objects.append(new_obj)
+        
+        # Undo/Redo-Command erstellen
+        if self.undo_redo_manager:
+            from ..utils.commands import ObjectAddCommand
+            command = ObjectAddCommand(
+                self.objects,
+                new_obj,
+                lambda: self.canvas.update()
+            )
+            self.undo_redo_manager.execute_command(command)
+            self.undo_redo_changed.emit()  # Signal für Button-Update
+        else:
+            self.canvas.update()
+        
+        self.save_scene()
+        
+        # Neues Objekt auswählen
+        self.selected_object_id = obj_id
+        self.object_selected.emit(new_obj)
+
+
+class CanvasWidget(QWidget):
+    """Eigentliches Canvas-Widget für Zeichnen"""
+    
+    mouse_pressed = Signal(QPoint)
+    mouse_moved = Signal(QPoint)
+    mouse_released = Signal(QPoint)
+    
+    def __init__(self, parent: SceneCanvas):
+        super().__init__()
+        self.parent_canvas = parent
+        self.setMinimumSize(400, 300)
+        self.setMouseTracking(True)
+        self.setAcceptDrops(True)  # Drag & Drop aktivieren
+        
+        # Sprites cache
+        self.sprite_cache: Dict[str, QPixmap] = {}
+    
+    def mousePressEvent(self, event):
+        """Maus-Druck Event"""
+        # Mittlere Maustaste für Panning
+        if event.button() == Qt.MiddleButton:
+            self.parent_canvas.panning = True
+            self.parent_canvas.pan_start_pos = event.position().toPoint()
+            return
+        
+        # Linke Maustaste für Objekt-Auswahl und Drag
+        if event.button() == Qt.LeftButton:
+            self.mouse_pressed.emit(event.position().toPoint())
+    
+    def mouseMoveEvent(self, event):
+        """Maus-Bewegung Event"""
+        # Panning mit mittlerer Maustaste
+        if self.parent_canvas.panning:
+            current_pos = event.position().toPoint()
+            dx = current_pos.x() - self.parent_canvas.pan_start_pos.x()
+            dy = current_pos.y() - self.parent_canvas.pan_start_pos.y()
+            self.parent_canvas.view_offset += QPoint(dx, dy)
+            self.parent_canvas.pan_start_pos = current_pos
+            self.update()
+            return
+        
+        self.mouse_moved.emit(event.position().toPoint())
+    
+    def mouseReleaseEvent(self, event):
+        """Maus-Losgelassen Event"""
+        # Panning beenden
+        if event.button() == Qt.MiddleButton:
+            self.parent_canvas.panning = False
+            return
+        
+        self.mouse_released.emit(event.position().toPoint())
+    
+    def wheelEvent(self, event: QWheelEvent):
+        """Mausrad-Event für Zoom mit Strg"""
+        # Prüfen ob Strg gedrückt ist
+        if event.modifiers() & Qt.ControlModifier:
+            # Zoom ändern
+            delta = event.angleDelta().y()
+            if delta > 0:
+                # Reinzoomen
+                new_value = min(200, self.parent_canvas.zoom_slider.value() + 5)
+            else:
+                # Rauszoomen
+                new_value = max(50, self.parent_canvas.zoom_slider.value() - 5)
+            
+            self.parent_canvas.zoom_slider.setValue(new_value)
+            event.accept()
+        else:
+            # Standard-Verhalten (Scrollen)
+            event.ignore()
+    
+    def dragEnterEvent(self, event):
+        """Wird aufgerufen wenn etwas über das Canvas gezogen wird"""
+        if event.mimeData().hasText():
+            event.acceptProposedAction()
+    
+    def dropEvent(self, event):
+        """Wird aufgerufen wenn etwas auf das Canvas fallen gelassen wird"""
+        if event.mimeData().hasText():
+            sprite_path = event.mimeData().text()
+            # Position relativ zum Canvas (mit Zoom und Panning)
+            pos = event.position().toPoint()
+            adjusted_pos = pos - self.parent_canvas.view_offset
+            zoom = self.parent_canvas.zoom_factor
+            world_x = int(adjusted_pos.x() / zoom)
+            world_y = int(adjusted_pos.y() / zoom)
+            
+            # An Grid ausrichten (Grid-Position) - sicherstellen dass Position eindeutig ist
+            grid_size = self.parent_canvas.grid_size
+            grid_x = (world_x // grid_size) * grid_size
+            grid_y = (world_y // grid_size) * grid_size
+            
+            # Sicherstellen dass Position genau auf Grid ist (keine Rundungsfehler)
+            grid_x = int(grid_x)
+            grid_y = int(grid_y)
+            
+            # Objekt im Grid zentrieren (Position = Grid-Position, Objekt ist grid_size x grid_size)
+            # Die Position ist bereits die obere linke Ecke des Grid-Felds
+            obj_x = grid_x
+            obj_y = grid_y
+            
+            # Objekt hinzufügen (prüft automatisch auf Duplikate)
+            self.parent_canvas.add_object_from_sprite(sprite_path, obj_x, obj_y)
+            
+            # Canvas sofort aktualisieren und Objekt auswählen
+            self.update()
+            event.acceptProposedAction()
+    
+    def paintEvent(self, event: QPaintEvent):
+        """Zeichnet den Canvas"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # Hintergrund
+        bg_color = self.parent_canvas.scene_data.get("background_color", [135, 206, 235])
+        if isinstance(bg_color, list) and len(bg_color) >= 3:
+            color = QColor(bg_color[0], bg_color[1], bg_color[2])
+        else:
+            color = QColor(135, 206, 235)
+        painter.fillRect(self.rect(), color)
+        
+        # Panning-Offset anwenden
+        offset = self.parent_canvas.view_offset
+        painter.translate(offset.x(), offset.y())
+        
+        # Raster ZUERST zeichnen (vor Zoom)
+        self._draw_grid(painter)
+        
+        # Zoom-Transform
+        zoom = self.parent_canvas.zoom_factor
+        painter.scale(zoom, zoom)
+        
+        # Zuerst Objekte aus anderen Layern grau-transparent zeichnen (Ghost-Ansicht)
+        current_layer = self.parent_canvas.current_layer
+        for obj in self.parent_canvas.objects:
+            obj_layer = obj.get("layer", "default")  # Rückwärtskompatibilität
+            if obj_layer != current_layer:
+                self._draw_object_ghost(painter, obj)
+        
+        # Dann Objekte des aktiven Layers normal zeichnen
+        for obj in self.parent_canvas.objects:
+            obj_layer = obj.get("layer", "default")  # Rückwärtskompatibilität
+            if obj_layer == current_layer:
+                self._draw_object(painter, obj)
+        
+        # Kollisionsboxen für alle Objekte im aktiven Layer zeichnen
+        for obj in self.parent_canvas.objects:
+            obj_layer = obj.get("layer", "default")
+            if obj_layer == current_layer:
+                collider_data = obj.get("collider", {})
+                if collider_data.get("enabled", False):
+                    self._draw_collider(painter, obj)
+                # Ground-Markierung zeichnen
+                if obj.get("ground", False):
+                    self._draw_ground_marker(painter, obj)
+        
+        # Selektion hervorheben (nur wenn im aktiven Layer)
+        if self.parent_canvas.selected_object_id:
+            for obj in self.parent_canvas.objects:
+                if obj.get("id") == self.parent_canvas.selected_object_id:
+                    obj_layer = obj.get("layer", "default")
+                    if obj_layer == current_layer:
+                        self._draw_selection(painter, obj)
+                    break
+    
+    def _draw_object(self, painter: QPainter, obj: Dict[str, Any]):
+        """Zeichnet ein Objekt"""
+        x = int(obj.get("x", 0))
+        y = int(obj.get("y", 0))
+        width = int(obj.get("width", 32))
+        height = int(obj.get("height", 32))
+        
+        # Dezente Hervorhebung (wenn aktiviert)
+        if self.parent_canvas.show_highlights:
+            # Leicht transparentes hellblaues Rechteck
+            highlight_color = QColor(192, 224, 240, 80)  # Dezentes Hellblau, 80 Alpha
+            painter.setPen(QPen(QColor(192, 224, 240, 120), 1))
+            painter.setBrush(QBrush(highlight_color))
+            painter.drawRect(x, y, width, height)
+        
+        # Sprite laden
+        sprite_path = obj.get("sprite")
+        if sprite_path and self.parent_canvas.project_path:
+            try:
+                # Pfad normalisieren (kann absolut oder relativ sein)
+                sprite_path_obj = Path(sprite_path)
+                if sprite_path_obj.is_absolute():
+                    full_path = sprite_path_obj
+                else:
+                    full_path = self.parent_canvas.project_path / sprite_path
+                
+                # Pfad-Separatoren normalisieren für Cache-Key
+                cache_key = str(sprite_path).replace("\\", "/")
+                
+                if full_path.exists() and full_path.is_file():
+                    if cache_key not in self.sprite_cache:
+                        pixmap = QPixmap(str(full_path))
+                        if not pixmap.isNull():
+                            # Immer auf die Projekteinstellungs-Größe skalieren
+                            target_size = self.parent_canvas.grid_size
+                            pixmap = pixmap.scaled(target_size, target_size, 
+                                                 Qt.AspectRatioMode.IgnoreAspectRatio,
+                                                 Qt.TransformationMode.SmoothTransformation)
+                            self.sprite_cache[cache_key] = pixmap
+                    
+                    if cache_key in self.sprite_cache:
+                        painter.drawPixmap(x, y, width, height, self.sprite_cache[cache_key])
+                        # Label zeichnen (wenn aktiviert)
+                        if self.parent_canvas.show_labels:
+                            self._draw_label(painter, obj, x, y, width, height)
+                        return
+            except Exception as e:
+                # Fehler beim Laden des Sprites - Fallback verwenden
+                pass
+        
+        # Fallback: Rechteck
+        painter.setPen(QPen(QColor(200, 200, 200), 2))
+        painter.setBrush(QBrush(QColor(200, 200, 200, 100)))
+        painter.drawRect(x, y, width, height)
+        
+        # Label zeichnen (wenn aktiviert)
+        if self.parent_canvas.show_labels:
+            self._draw_label(painter, obj, x, y, width, height)
+    
+    def _draw_collider(self, painter: QPainter, obj: Dict[str, Any]):
+        """Zeichnet die Kollisionsbox als rote Box"""
+        collider_data = obj.get("collider", {})
+        if not collider_data.get("enabled", False):
+            return
+        
+        # Kollisionsbox-Position und -Größe
+        # Falls nicht explizit gesetzt, Objekt-Position/Größe verwenden
+        collider_x = int(collider_data.get("x", obj.get("x", 0)))
+        collider_y = int(collider_data.get("y", obj.get("y", 0)))
+        collider_width = int(collider_data.get("width", obj.get("width", 32)))
+        collider_height = int(collider_data.get("height", obj.get("height", 32)))
+        
+        # Rote Box für Kollisionsbox zeichnen
+        painter.setPen(QPen(QColor(255, 0, 0), 2))
+        painter.setBrush(QBrush(QColor(255, 0, 0, 30)))  # Leicht transparentes Rot
+        painter.drawRect(collider_x, collider_y, collider_width, collider_height)
+    
+    def _draw_ground_marker(self, painter: QPainter, obj: Dict[str, Any]):
+        """Zeichnet eine grüne Markierung am unteren Rand für Ground-Tiles"""
+        x = int(obj.get("x", 0))
+        y = int(obj.get("y", 0))
+        width = int(obj.get("width", 32))
+        height = int(obj.get("height", 32))
+        
+        # Grüne Linie am unteren Rand des Objekts
+        bottom_y = y + height
+        painter.setPen(QPen(QColor(0, 255, 0), 3))  # Grüne Linie, 3px dick
+        painter.drawLine(x, bottom_y, x + width, bottom_y)
+        
+        # Optional: Grüne Markierung in der oberen linken Ecke
+        painter.setPen(QPen(QColor(0, 255, 0), 2))
+        painter.setBrush(QBrush(QColor(0, 255, 0, 100)))  # Leicht transparentes Grün
+        marker_size = 8
+        painter.drawEllipse(x + 2, y + 2, marker_size, marker_size)
+    
+    def _draw_label(self, painter: QPainter, obj: Dict[str, Any], x: int, y: int, width: int, height: int):
+        """Zeichnet das Label (Name oder ID) über dem Objekt"""
+        # Name oder ID bestimmen
+        display_name = obj.get("name") or obj.get("id", "unknown")
+        
+        # Text mit Hintergrund für bessere Lesbarkeit
+        font = painter.font()
+        font.setPointSize(8)
+        painter.setFont(font)
+        
+        # Text-Metriken
+        metrics = painter.fontMetrics()
+        text_width = metrics.horizontalAdvance(display_name)
+        text_height = metrics.height()
+        
+        # Hintergrund für Text (halbtransparentes Weiß)
+        bg_rect = QRect(x + 2, y + 2, min(text_width + 4, width - 4), text_height + 2)
+        painter.setPen(QPen(QColor(255, 255, 255, 200), 1))
+        painter.setBrush(QBrush(QColor(255, 255, 255, 180)))
+        painter.drawRect(bg_rect)
+        
+        # Text zeichnen
+        painter.setPen(QPen(QColor(0, 0, 0)))
+        painter.drawText(x + 4, y + text_height + 2, display_name)
+    
+    def _draw_object_ghost(self, painter: QPainter, obj: Dict[str, Any]):
+        """Zeichnet ein Objekt aus einem anderen Layer grau-transparent (Ghost-Ansicht)"""
+        x = int(obj.get("x", 0))
+        y = int(obj.get("y", 0))
+        width = int(obj.get("width", 32))
+        height = int(obj.get("height", 32))
+        
+        # Sprite laden und grau-transparent machen
+        sprite_path = obj.get("sprite")
+        if sprite_path and self.parent_canvas.project_path:
+            try:
+                # Pfad normalisieren (kann absolut oder relativ sein)
+                sprite_path_obj = Path(sprite_path)
+                if sprite_path_obj.is_absolute():
+                    full_path = sprite_path_obj
+                else:
+                    full_path = self.parent_canvas.project_path / sprite_path
+                
+                # Pfad-Separatoren normalisieren für Cache-Key
+                cache_key = str(sprite_path).replace("\\", "/")
+                
+                if full_path.exists() and full_path.is_file():
+                    # Sprite laden (aus Cache oder neu)
+                    if cache_key not in self.sprite_cache:
+                        pixmap = QPixmap(str(full_path))
+                        if not pixmap.isNull():
+                            # Immer auf die Projekteinstellungs-Größe skalieren
+                            target_size = self.parent_canvas.grid_size
+                            pixmap = pixmap.scaled(target_size, target_size, 
+                                                 Qt.AspectRatioMode.IgnoreAspectRatio,
+                                                 Qt.TransformationMode.SmoothTransformation)
+                            self.sprite_cache[cache_key] = pixmap
+                    
+                    if cache_key in self.sprite_cache:
+                        # Grau-transparente Version zeichnen
+                        painter.setOpacity(0.35)  # 35% Opazität
+                        # Sprite zeichnen
+                        painter.drawPixmap(x, y, width, height, self.sprite_cache[cache_key])
+                        # Graues Overlay für Graustufen-Effekt
+                        painter.setCompositionMode(QPainter.CompositionMode_SourceAtop)
+                        gray_overlay = QPixmap(width, height)
+                        gray_overlay.fill(QColor(128, 128, 128, 200))
+                        painter.drawPixmap(x, y, gray_overlay)
+                        painter.setOpacity(1.0)  # Zurücksetzen
+                        painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+                        return
+            except Exception:
+                # Fehler beim Laden - Fallback verwenden
+                # Opacity und CompositionMode zurücksetzen falls gesetzt
+                painter.setOpacity(1.0)
+                painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+                pass
+        
+        # Fallback: Grau-transparentes Rechteck
+        painter.setOpacity(0.3)
+        painter.setPen(QPen(QColor(128, 128, 128), 1))
+        painter.setBrush(QBrush(QColor(128, 128, 128, 50)))
+        painter.drawRect(x, y, width, height)
+        painter.setOpacity(1.0)
+    
+    def _draw_selection(self, painter: QPainter, obj: Dict[str, Any]):
+        """Zeichnet Selektion-Highlight"""
+        x = int(obj.get("x", 0))
+        y = int(obj.get("y", 0))
+        width = int(obj.get("width", 32))
+        height = int(obj.get("height", 32))
+        
+        painter.setPen(QPen(QColor(255, 255, 0), 3))
+        painter.setBrush(QBrush(QColor(255, 255, 0, 50)))
+        painter.drawRect(x - 2, y - 2, width + 4, height + 4)
+    
+    def _draw_grid(self, painter: QPainter):
+        """Zeichnet ein Raster (einstellbare Größe)"""
+        grid_size = self.parent_canvas.grid_size
+        zoom = self.parent_canvas.zoom_factor
+        effective_grid = grid_size * zoom
+        
+        # Nur zeichnen wenn Grid groß genug ist
+        if effective_grid < 2:
+            return
+        
+        # Grid-Farbe verwenden
+        grid_color = self.parent_canvas.grid_color
+        painter.setPen(QPen(grid_color, 1))
+        
+        # Viewport-Bereich berechnen (mit Panning-Offset)
+        offset = self.parent_canvas.view_offset
+        view_x = -offset.x() / zoom
+        view_y = -offset.y() / zoom
+        view_width = self.width() / zoom
+        view_height = self.height() / zoom
+        
+        # Start-Position für Grid (an Grid ausrichten)
+        start_x = (int(view_x) // grid_size) * grid_size
+        start_y = (int(view_y) // grid_size) * grid_size
+        
+        # Vertikale Linien
+        x = start_x
+        while x < view_x + view_width:
+            painter.drawLine(int(x * zoom), int(view_y * zoom), 
+                           int(x * zoom), int((view_y + view_height) * zoom))
+            x += grid_size
+        
+        # Horizontale Linien
+        y = start_y
+        while y < view_y + view_height:
+            painter.drawLine(int(view_x * zoom), int(y * zoom), 
+                           int((view_x + view_width) * zoom), int(y * zoom))
+            y += grid_size
