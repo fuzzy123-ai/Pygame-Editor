@@ -62,3 +62,26 @@ Ein kleiner Aktualisieren-Pfeil im Asset Browser fehlt. Wenn eine Datei über Wi
 - Datei: `game_editor/ui/asset_browser.py`
 - Methoden: `_refresh_assets()`, `_on_folder_changed()`
 - Fix: File-Watcher überwacht jetzt `assets/images/` Ordner, automatische Aktualisierung bei Änderungen
+
+## Offene Bugs
+
+### Kollisionsbehandlung: Wackeln bei Boden-Kollision
+**Status:** Offen  
+**Beschreibung:** Die `move_with_collision()` Funktion führt zu einem Wackeln (hoch und runter springen), wenn ein Objekt auf dem Boden steht. Die Kollisionsbehandlung korrigiert die Position zu aggressiv, was zu einem Bounce-Effekt führt.
+
+**Betroffene Dateien:**
+- `game_editor/engine/api.py` - `move_with_collision()` Funktion
+
+**Erwartetes Verhalten:**
+- Objekte sollten ruhig auf dem Boden stehen, ohne zu wackeln
+- Kollisionsbehandlung sollte nur korrigieren, wenn wirklich eine Kollision vorliegt
+- Position sollte nur angepasst werden, wenn das Objekt wirklich in den Boden eindringt
+
+**Aktuelles Verhalten:**
+- Objekte wackeln hoch und runter, wenn sie auf dem Boden stehen
+- Die Position wird in jedem Frame korrigiert, auch wenn keine Bewegung stattfindet
+
+**Lösungsansatz:**
+- Prüfung verbessern, ob das Objekt wirklich in den Boden eindringt
+- Position nur korrigieren, wenn sich das Objekt tatsächlich bewegt hat
+- Bessere Unterscheidung zwischen "auf Boden stehen" und "in Boden eindringen"

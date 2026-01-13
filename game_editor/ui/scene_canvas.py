@@ -31,6 +31,7 @@ class SceneCanvas(QWidget):
         self._duplicate_preview_mode = False  # Flag für Duplizieren mit Vorschau
         self._duplicate_preview_objects = []  # Liste der Vorschau-Objekte (Dicts)
         self._duplicate_preview_offset = QPoint(0, 0)  # Offset für Vorschau-Position
+        self._duplicate_preview_mouse_start = QPoint(0, 0)  # Maus-Position beim Start des Duplizierens
         
         # Zoom
         self.zoom_factor = 1.0
@@ -931,13 +932,15 @@ class SceneCanvas(QWidget):
     def _generate_unique_id(self) -> str:
         """Generiert eine eindeutige Objekt-ID"""
         existing_ids = {obj.get("id") for obj in self.objects if obj.get("id")}
-        base_id = f"object_{len(self.objects) + 1}"
-        obj_id = base_id
-        counter = 1
-        while obj_id in existing_ids:
-            obj_id = f"object_{len(self.objects) + 1 + counter}"
-            counter += 1
-        return obj_id
+        
+        # Finde die erste verfügbare Nummer, beginnend bei 1
+        # Das stellt sicher, dass IDs bei 1 beginnen, auch wenn Objekte gelöscht wurden
+        num = 1
+        while True:
+            obj_id = f"object_{num}"
+            if obj_id not in existing_ids:
+                return obj_id
+            num += 1
     
     def _generate_unique_name(self, desired_name: str = "") -> str:
         """Generiert einen eindeutigen Namen (falls Name gewünscht)"""
@@ -1521,7 +1524,7 @@ class SceneCanvas(QWidget):
                 self.save_scene()
                 self.canvas.update()
     
-    def _start_duplicate_preview(self, obj_ids: List[str]):
+    def _start_duplicate_preview(self, obj_ids: List[str], mouse_world_pos: QPoint = None):
         """Startet den Duplizieren-Vorschau-Modus"""
         if not obj_ids:
             return
@@ -1530,6 +1533,11 @@ class SceneCanvas(QWidget):
         self._duplicate_preview_objects = []
         self._duplicate_preview_offset = QPoint(0, 0)
         
+        # Berechne den Mittelpunkt aller zu duplizierenden Objekte
+        total_x = 0
+        total_y = 0
+        count = 0
+        
         for obj_id in obj_ids:
             obj = next((o for o in self.objects if o.get("id") == obj_id), None)
             if obj:
@@ -1537,13 +1545,43 @@ class SceneCanvas(QWidget):
                 if obj_layer == self.current_layer:  # Nur Objekte im aktiven Layer
                     # Objekt kopieren (ohne ID, wird später generiert)
                     obj_copy = obj.copy()
+                    obj_x = obj.get("x", 0)
+                    obj_y = obj.get("y", 0)
+                    obj_width = obj_copy.get("width", self.grid_size)
+                    obj_height = obj_copy.get("height", self.grid_size)
+                    
+                    # Objekt-Mitte berechnen
+                    center_x = obj_x + obj_width / 2
+                    center_y = obj_y + obj_height / 2
+                    total_x += center_x
+                    total_y += center_y
+                    count += 1
+                    
                     self._duplicate_preview_objects.append({
                         "original": obj,
                         "copy": obj_copy,
-                        "start_pos": QPoint(obj.get("x", 0), obj.get("y", 0))
+                        "start_pos": QPoint(obj_x, obj_y)
                     })
         
-        if self._duplicate_preview_objects:
+        if self._duplicate_preview_objects and count > 0:
+            # Mittelpunkt aller Objekte
+            objects_center_x = total_x / count
+            objects_center_y = total_y / count
+            
+            # Wenn Maus-Position übergeben wurde, verwende diese, sonst verwende Objekt-Mitte
+            if mouse_world_pos:
+                # Offset berechnen: Maus-Position - Objekte-Mittelpunkt
+                dx = mouse_world_pos.x() - objects_center_x
+                dy = mouse_world_pos.y() - objects_center_y
+                # An Grid ausrichten
+                grid_size = self.grid_size
+                grid_dx = ((dx // grid_size) * grid_size) - (dx % grid_size)
+                grid_dy = ((dy // grid_size) * grid_size) - (dy % grid_size)
+                self._duplicate_preview_offset = QPoint(int(grid_dx), int(grid_dy))
+                self._duplicate_preview_mouse_start = QPoint(mouse_world_pos.x(), mouse_world_pos.y())
+            else:
+                self._duplicate_preview_mouse_start = QPoint(int(objects_center_x), int(objects_center_y))
+            
             self._duplicate_preview_mode = True
             self.canvas.setCursor(Qt.CursorShape.CrossCursor)  # Kreuz-Cursor für Platzierung
             self.canvas.update()
@@ -1703,24 +1741,14 @@ class SceneCanvas(QWidget):
             existing_ids = {obj.get("id") for obj in self.objects if obj.get("id")}
             existing_ids.update(generated_ids)  # Auch bereits generierte IDs berücksichtigen
             
-            # Finde die höchste Nummer aus allen existierenden IDs
-            max_num = 0
-            for existing_id in existing_ids:
-                if existing_id and existing_id.startswith("object_"):
-                    try:
-                        num_str = existing_id.replace("object_", "")
-                        num = int(num_str)
-                        max_num = max(max_num, num)
-                    except ValueError:
-                        pass
-            
-            # Starte mit der nächsten Nummer
-            base_num = max_num + 1
-            obj_id = f"object_{base_num}"
-            counter = 1
-            while obj_id in existing_ids:
-                obj_id = f"object_{base_num + counter}"
-                counter += 1
+            # Finde die erste verfügbare Nummer, beginnend bei 1
+            # Das stellt sicher, dass IDs bei 1 beginnen, auch wenn Objekte gelöscht wurden
+            num = 1
+            while True:
+                obj_id = f"object_{num}"
+                if obj_id not in existing_ids:
+                    break
+                num += 1
             
             new_obj["id"] = obj_id
             generated_ids.add(obj_id)  # ID als generiert markieren
@@ -1877,8 +1905,9 @@ class CanvasWidget(QWidget):
             
             # Duplizieren-Option (direkt nach Separator, nahe an Maus)
             duplicate_action = menu.addAction("Duplizieren")
+            mouse_world_pos = QPoint(world_x, world_y)
             duplicate_action.triggered.connect(
-                lambda: self.parent_canvas._start_duplicate_preview(self.parent_canvas.selected_object_ids)
+                lambda: self.parent_canvas._start_duplicate_preview(self.parent_canvas.selected_object_ids, mouse_world_pos)
             )
             
             # Löschen-Option (direkt nach Duplizieren, nahe an Maus)
@@ -1994,22 +2023,42 @@ class CanvasWidget(QWidget):
             world_x = int(adjusted_pos.x() / zoom)
             world_y = int(adjusted_pos.y() / zoom)
             
-            # Offset berechnen (relativ zum ersten Objekt)
+            # Offset berechnen: Vorschau auf Maus zentrieren
             if self.parent_canvas._duplicate_preview_objects:
-                first_obj = self.parent_canvas._duplicate_preview_objects[0]
-                start_pos = first_obj["start_pos"]
+                # Berechne den Mittelpunkt aller zu duplizierenden Objekte (in ihrer ursprünglichen Position)
+                total_x = 0
+                total_y = 0
+                count = 0
                 
-                # Delta berechnen
-                dx = world_x - start_pos.x()
-                dy = world_y - start_pos.y()
+                for preview_data in self.parent_canvas._duplicate_preview_objects:
+                    start_pos = preview_data["start_pos"]
+                    obj_copy = preview_data["copy"]
+                    # Verwende die Objekt-Mitte (Position + halbe Größe)
+                    obj_width = obj_copy.get("width", self.parent_canvas.grid_size)
+                    obj_height = obj_copy.get("height", self.parent_canvas.grid_size)
+                    center_x = start_pos.x() + obj_width / 2
+                    center_y = start_pos.y() + obj_height / 2
+                    total_x += center_x
+                    total_y += center_y
+                    count += 1
                 
-                # An Grid ausrichten
-                grid_size = self.parent_canvas.grid_size
-                grid_dx = ((dx // grid_size) * grid_size) - (dx % grid_size)
-                grid_dy = ((dy // grid_size) * grid_size) - (dy % grid_size)
-                
-                self.parent_canvas._duplicate_preview_offset = QPoint(grid_dx, grid_dy)
-                self.update()
+                if count > 0:
+                    # Mittelpunkt aller Objekte (in ursprünglicher Position)
+                    objects_center_x = total_x / count
+                    objects_center_y = total_y / count
+                    
+                    # Maus-Position an Grid ausrichten
+                    grid_size = self.parent_canvas.grid_size
+                    grid_mouse_x = (world_x // grid_size) * grid_size
+                    grid_mouse_y = (world_y // grid_size) * grid_size
+                    
+                    # Delta berechnen: Grid-ausgerichtete Maus-Position - Objekte-Mittelpunkt
+                    # Das verschiebt die Objekte so, dass ihr Mittelpunkt an der Maus liegt
+                    dx = grid_mouse_x - objects_center_x
+                    dy = grid_mouse_y - objects_center_y
+                    
+                    self.parent_canvas._duplicate_preview_offset = QPoint(int(dx), int(dy))
+                    self.update()
             return
         
         # Panning mit mittlerer Maustaste

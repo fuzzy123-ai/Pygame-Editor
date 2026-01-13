@@ -178,3 +178,73 @@ def clear_debug_output():
     """Löscht alle Debug-Ausgaben (wird von Editor verwendet)"""
     global _debug_output
     _debug_output = []
+
+
+def move_with_collision(obj: GameObject, dx: float, dy: float) -> Tuple[bool, bool, bool]:
+    """
+    Bewegt ein Objekt mit automatischer Kollisionsbehandlung
+    
+    Args:
+        obj: Das zu bewegende Objekt
+        dx: Bewegung in X-Richtung
+        dy: Bewegung in Y-Richtung
+        
+    Returns:
+        Tuple (on_ground, collision_x, collision_y)
+        - on_ground: True wenn Objekt auf Boden steht
+        - collision_x: True wenn Kollision in X-Richtung
+        - collision_y: True wenn Kollision in Y-Richtung
+    """
+    if not obj:
+        return (False, False, False)
+    
+    # Position vor der Bewegung speichern
+    old_x = obj.x
+    old_y = obj.y
+    
+    # Bewegung anwenden (immer, auch ohne Kollisionsbox)
+    obj.x += dx
+    obj.y += dy
+    
+    # Kollisionsprüfung nur wenn Objekt eine Kollisionsbox hat
+    if not obj._collider_enabled:
+        return (False, False, False)
+    
+    # Prüfe horizontale Kollisionen (X-Achse) - NUR wenn sich bewegt
+    collision_x = False
+    if dx != 0:
+        for other in _game_objects:
+            if other.id != obj.id and other.is_ground and other._collider_enabled:
+                if obj.collides_with(other.id):
+                    # Kollision in X-Richtung - Position zurücksetzen
+                    obj.x = old_x
+                    collision_x = True
+                    break
+    
+    # Prüfe vertikale Kollisionen (Y-Achse)
+    on_ground = False
+    collision_y = False
+    
+    # Prüfe ob Objekt mit Boden kollidiert
+    for other in _game_objects:
+        if other.id != obj.id and other.is_ground and other._collider_enabled:
+            if obj.collides_with(other.id):
+                collision_y = True
+                if dy > 0:  # Objekt fällt nach unten
+                    # Objekt war über dem Boden - jetzt auf Boden setzen
+                    # Verwende die Y-Position der Kollisionsbox des Bodens (other._collider_y)
+                    # minus Objekt-Höhe, um die Unterseite des Objekts auf die Oberseite des Bodens zu setzen
+                    on_ground = True
+                    obj.y = other._collider_y - obj.height
+                elif dy < 0:  # Objekt springt nach oben
+                    # Position zurücksetzen wenn gegen Decke
+                    obj.y = old_y
+                elif dy == 0:  # Objekt bewegt sich nicht vertikal
+                    # Prüfe ob Objekt wirklich auf dem Boden steht
+                    # Wenn Unterseite des Objekts nahe an Oberseite des Bodens
+                    # Toleranz von 2 Pixeln
+                    if obj.y + obj.height <= other._collider_y + 2:
+                        on_ground = True
+                break
+    
+    return (on_ground, collision_x, collision_y)

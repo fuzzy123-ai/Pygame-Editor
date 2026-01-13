@@ -1,0 +1,99 @@
+---
+name: Code Quality & Maintainability
+description: Ensures sustainable, robust, professional code with extensibility in mind
+---
+
+# Code Quality & Maintainability Standards
+
+## Core Principles
+
+### 1. Ask First, Code Second
+**CRITICAL**: When encountering uncertainties, ambiguities, or unclear requirements:
+- **ALWAYS ask the user for clarification BEFORE implementing**
+- Never make assumptions about requirements or behavior
+- If multiple approaches are possible, present options and ask which to use
+- When design decisions affect future extensibility, discuss with the user first
+
+### 2. Extensibility & Future-Proofing
+When writing code that may need future features or modifications:
+- **Design for extension**: Use interfaces, abstract classes, or plugin patterns where appropriate
+- **Avoid hard-coded dependencies**: Use dependency injection, configuration, or factory patterns
+- **Separate concerns**: Keep business logic separate from UI, data access, and utilities
+- **Open/Closed Principle**: Code should be open for extension but closed for modification
+- **Use composition over inheritance** when it improves flexibility
+- **Avoid premature optimization**: Write clear, maintainable code first
+
+### 3. Code Quality Standards
+
+#### Robustness
+- **Error handling**: Always handle expected errors gracefully with try/except blocks
+- **Input validation**: Validate all user inputs and external data
+- **Defensive programming**: Check for None, empty collections, and edge cases
+- **Resource management**: Use context managers (`with` statements) for file operations
+- **No silent failures**: Log errors appropriately, don't swallow exceptions without reason
+
+#### Professional Structure
+- **Clear naming**: Use descriptive names for variables, functions, and classes
+- **Single Responsibility**: Each function/class should do one thing well
+- **DRY (Don't Repeat Yourself)**: Extract common code into reusable functions
+- **Documentation**: Add docstrings for public APIs and complex logic
+- **Type hints**: Use type hints for function parameters and return values (Python 3.10+)
+- **Consistent style**: Follow PEP 8 and project conventions
+
+#### Maintainability
+- **Modular design**: Break code into logical modules and packages
+- **Low coupling**: Minimize dependencies between modules
+- **High cohesion**: Related functionality should be grouped together
+- **Clear abstractions**: Use meaningful abstractions that hide complexity
+- **Testable code**: Write code that can be easily tested (avoid global state, use dependency injection)
+
+## Implementation Guidelines
+
+### When Adding New Features
+1. **Check existing patterns**: Follow established patterns in the codebase
+2. **Consider impact**: Evaluate how changes affect existing code
+3. **Plan for extension**: Design APIs that can accommodate future needs
+4. **Document decisions**: Add comments explaining non-obvious design choices
+
+### When Refactoring
+1. **Maintain backward compatibility** when possible
+2. **Update related code**: Don't leave orphaned or broken references
+3. **Test thoroughly**: Ensure existing functionality still works
+4. **Incremental changes**: Make small, focused changes rather than large rewrites
+
+### When Fixing Bugs
+1. **Root cause analysis**: Fix the underlying issue, not just symptoms
+2. **Prevent regressions**: Add checks or tests to prevent similar issues
+3. **Document the fix**: Explain why the fix works in comments or commit messages
+
+## Project-Specific Considerations
+
+### For This Game Editor Project
+- **Educational context**: Code should be clear and understandable (students may read it)
+- **Stability**: Editor must remain stable even when student code has errors
+- **Portability**: Use relative paths, avoid hard-coded absolute paths
+- **Qt/PyQt patterns**: Follow Qt best practices for UI components
+- **Process isolation**: Game runtime runs in separate process - maintain clear boundaries
+
+## Code Review Checklist
+
+Before submitting code, ensure:
+- [ ] All uncertainties were clarified with the user
+- [ ] Code follows existing project patterns
+- [ ] Error handling is appropriate
+- [ ] Code is extensible for future features
+- [ ] No hard-coded values that should be configurable
+- [ ] Clear, descriptive names used throughout
+- [ ] Complex logic is documented
+- [ ] No unnecessary coupling between modules
+- [ ] Resource cleanup is handled properly
+
+## When in Doubt
+
+**If you're unsure about ANY aspect of implementation:**
+1. **STOP coding**
+2. **Ask the user** for clarification or guidance
+3. **Propose options** if multiple approaches are viable
+4. **Wait for confirmation** before proceeding
+
+Remember: It's better to ask and get it right than to assume and create technical debt.

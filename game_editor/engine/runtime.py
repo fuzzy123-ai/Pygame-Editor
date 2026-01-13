@@ -11,10 +11,11 @@ from .loader import load_project, load_scene, create_objects_from_scene
 from .gameobject import GameObject
 from .api import (_init_api, _update_key_states, get_debug_output, 
                   clear_debug_output, print_debug, get_object, get_all_objects,
-                  key_pressed, key_down, mouse_position, spawn_object)
+                  key_pressed, key_down, mouse_position, spawn_object,
+                  move_with_collision)
 
-# libpng Warnungen unterdrücken (iCCP: known incorrect sRGB profile)
-warnings.filterwarnings("ignore", category=UserWarning, message=".*iCCP.*")
+# libpng Warnungen werden direkt auf stderr geschrieben, nicht als Python warnings
+# Sie werden in gameobject.py beim Laden der Bilder unterdrückt
 
 # Fehler-Übersetzungen (Deutsch)
 ERROR_TRANSLATIONS: Dict[str, str] = {
@@ -66,6 +67,7 @@ def load_student_code(game_code_path: Path, game_objects: list[GameObject]) -> D
         # Utility
         "print_debug": print_debug,
         "spawn_object": spawn_object,
+        "move_with_collision": move_with_collision,
         
         # Standard-Python (für Schüler nützlich)
         "print": print,

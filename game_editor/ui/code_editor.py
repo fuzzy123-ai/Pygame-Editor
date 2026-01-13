@@ -881,35 +881,27 @@ def update():
     global velocity_y, on_ground
     
     # Horizontal-Bewegung
+    dx = 0
     if key_pressed("LEFT"):
-        bear.x -= speed
+        dx = -speed
     if key_pressed("RIGHT"):
-        bear.x += speed
+        dx = speed
     
     # Schwerkraft
-    velocity_y += gravity
-    
-    # Prüfe Kollision mit Boden-Tiles
-    on_ground = False
-    all_objects = get_all_objects()
-    
-    # Prüfe Kollision mit allen Boden-Objekten
-    for obj in all_objects:
-        if obj.is_ground and bear.collides_with(obj.id):
-            # Kollision mit Boden - auf Boden setzen
-            on_ground = True
-            velocity_y = 0
-            # Position so anpassen, dass Bär auf Boden steht
-            bear.y = obj.y - bear.height
-            break
-    
-    # Wenn nicht auf Boden, falle
     if not on_ground:
-        bear.y += velocity_y
+        velocity_y += gravity
     
-    # Sprung mit Leertaste
+    # Bewegung mit automatischer Kollisionsbehandlung
+    on_ground, collision_x, collision_y = move_with_collision(bear, dx, velocity_y)
+    
+    # Wenn auf Boden, Geschwindigkeit zurücksetzen
+    if on_ground:
+        velocity_y = 0
+    
+    # Sprung
     if key_down("SPACE") and on_ground:
-        velocity_y = -10</pre>
+        velocity_y = -10
+        on_ground = False</pre>
         
         <h3 style="color: #90caf9;">Bewegliche Plattform</h3>
         <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">

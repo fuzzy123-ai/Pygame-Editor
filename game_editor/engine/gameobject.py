@@ -56,10 +56,23 @@ class GameObject:
             if sprite_full_path.exists():
                 try:
                     # libpng Warnungen unterdrücken (iCCP: known incorrect sRGB profile)
-                    import warnings
-                    with warnings.catch_warnings():
-                        warnings.filterwarnings("ignore", category=UserWarning, message=".*iCCP.*")
-                        self._sprite_surface = pygame.image.load(str(sprite_full_path)).convert_alpha()
+                    # Diese Warnungen werden direkt auf stderr geschrieben, nicht als Python warnings
+                    import sys
+                    import os
+                    import io
+                    from contextlib import redirect_stderr
+                    
+                    # Temporär stderr umleiten, um libpng Warnungen zu filtern
+                    # Verwende os.devnull für bessere Kompatibilität
+                    original_stderr = sys.stderr
+                    try:
+                        # Versuche stderr auf devnull umzuleiten
+                        with open(os.devnull, 'w', encoding='utf-8') as devnull:
+                            sys.stderr = devnull
+                            self._sprite_surface = pygame.image.load(str(sprite_full_path)).convert_alpha()
+                    finally:
+                        # stderr wiederherstellen
+                        sys.stderr = original_stderr
                     # Immer auf die Projekteinstellungs-Größe skalieren
                     target_size = int(sprite_size)
                     if self._sprite_surface.get_width() != target_size or \
@@ -74,22 +87,49 @@ class GameObject:
         # Collider
         self._collider_enabled: bool = False
         self._collider_type: str = "rect"
-        self._collider_x: float = 0.0
-        self._collider_y: float = 0.0
+        # WICHTIG: offset_x und offset_y sind relativ zum Objekt!
+        # Die absolute Position wird dynamisch als Property berechnet
+        self._collider_offset_x: float = 0.0
+        self._collider_offset_y: float = 0.0
         self._collider_width: float = 0.0
         self._collider_height: float = 0.0
+        
+        # Ground (Boden-Tile) - MUSS vor Collider gesetzt werden
+        self.is_ground: bool = data.get("ground", False)
+        
+        # WICHTIG: Boden-Objekte bekommen automatisch eine Kollisionsbox
+        # Das stellt sicher, dass Boden-Kollisionen funktionieren
+        if self.is_ground and ("collider" not in data or not data["collider"].get("enabled", False)):
+            # Automatisch Kollisionsbox für Boden-Objekte aktivieren
+            if "collider" not in data:
+                data["collider"] = {}
+            data["collider"]["enabled"] = True
+            data["collider"]["type"] = "rect"
+            # Falls keine expliziten Werte gesetzt, volle Objekt-Größe verwenden
+            if "width" not in data["collider"]:
+                data["collider"]["width"] = self.width
+            if "height" not in data["collider"]:
+                data["collider"]["height"] = self.height
+            if "offset_x" not in data["collider"]:
+                data["collider"]["offset_x"] = 0
+            if "offset_y" not in data["collider"]:
+                data["collider"]["offset_y"] = 0
         
         if "collider" in data and data["collider"].get("enabled", False):
             self._collider_enabled = True
             self._collider_type = data["collider"].get("type", "rect")
-            # Kollisionsbox-Position und -Größe (falls explizit gesetzt, sonst Objekt-Werte)
-            self._collider_x = float(data["collider"].get("x", self.x))
-            self._collider_y = float(data["collider"].get("y", self.y))
+            # WICHTIG: offset_x und offset_y sind relativ zum Objekt!
+            # Diese werden gespeichert, die absolute Position wird dynamisch berechnet
+            self._collider_offset_x = float(data["collider"].get("offset_x", 0))
+            self._collider_offset_y = float(data["collider"].get("offset_y", 0))
             self._collider_width = float(data["collider"].get("width", self.width))
             self._collider_height = float(data["collider"].get("height", self.height))
-        
-        # Ground (Boden-Tile)
-        self.is_ground: bool = data.get("ground", False)
+        else:
+            # Keine Kollisionsbox
+            self._collider_offset_x = 0.0
+            self._collider_offset_y = 0.0
+            self._collider_width = 0.0
+            self._collider_height = 0.0
         
         # Referenz zu allen Objekten (für collides_with)
         self._all_objects: list['GameObject'] = []
@@ -107,6 +147,16 @@ class GameObject:
     def sprite(self, path: str):
         """Setzt einen neuen Sprite (relativer Pfad)"""
         self._sprite_path = path
+    
+    @property
+    def _collider_x(self) -> float:
+        """Gibt die absolute X-Position der Kollisionsbox zurück (dynamisch berechnet)"""
+        return self.x + self._collider_offset_x
+    
+    @property
+    def _collider_y(self) -> float:
+        """Gibt die absolute Y-Position der Kollisionsbox zurück (dynamisch berechnet)"""
+        return self.y + self._collider_offset_y
     
     def collides_with(self, other_id: str) -> bool:
         """
