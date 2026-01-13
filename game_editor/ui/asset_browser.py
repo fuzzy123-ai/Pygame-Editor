@@ -3,7 +3,8 @@ Asset Browser - Zeigt verfügbare Bilder und Assets
 """
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QListWidget, QLabel,
                                 QPushButton, QHBoxLayout, QFileDialog, QMessageBox,
-                                QComboBox, QDialog, QScrollArea, QMenu, QSlider, QFrame)
+                                QComboBox, QDialog, QScrollArea, QMenu, QSlider, QFrame,
+                                QInputDialog, QLineEdit)
 from PySide6.QtCore import Signal, Qt, QPoint, QMimeData, QFileSystemWatcher, QTimer
 from PySide6.QtGui import QPixmap, QIcon, QDrag, QDragEnterEvent, QDropEvent
 from pathlib import Path
@@ -32,16 +33,20 @@ class AssetBrowser(QWidget):
         self.setAcceptDrops(True)
         # Asset-Frames speichern für Highlighting
         self.asset_frames: Dict[str, QFrame] = {}
-        # File-Watcher für sprites/ Ordner
+        # File-Watcher für sprites/ und assets/images/ Ordner
         self.file_watcher = QFileSystemWatcher()
         # Timer für verzögertes Neuladen (verhindert zu häufige Updates)
         self.reload_timer = QTimer()
         self.reload_timer.setSingleShot(True)
+        # Timer für Asset-Browser-Aktualisierung (bei Datei-Löschung)
+        self.assets_reload_timer = QTimer()
+        self.assets_reload_timer.setSingleShot(True)
         self._init_ui()
         
         # Verbindungen nach _init_ui herstellen (Methoden müssen existieren)
         # Die Verbindung wird in load_project() hergestellt, wenn der Pfad bekannt ist
         self.reload_timer.timeout.connect(self._process_sprites_folder)
+        self.assets_reload_timer.timeout.connect(self._load_assets)
     
     def _init_ui(self):
         """Initialisiert die UI"""
@@ -117,6 +122,32 @@ class AssetBrowser(QWidget):
         """)
         extract_button.clicked.connect(self._extract_spritesheet)
         button_layout.addWidget(extract_button)
+        
+        # Aktualisieren-Button (grüner Pfeil)
+        refresh_button = QPushButton("↻")
+        refresh_button.setToolTip("Asset Browser aktualisieren")
+        refresh_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2d2d2d;
+                color: #4caf50;
+                border: 1px solid #3d3d3d;
+                border-radius: 3px;
+                padding: 5px;
+                font-size: 16pt;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #3d3d3d;
+                border-color: #4a9eff;
+                color: #66bb6a;
+            }
+            QPushButton:pressed {
+                background-color: #4d4d4d;
+            }
+        """)
+        refresh_button.clicked.connect(self._refresh_assets)
+        button_layout.addWidget(refresh_button)
+        
         layout.addLayout(button_layout)
         
         # Liste für Assets (einfach untereinander)
@@ -159,24 +190,36 @@ class AssetBrowser(QWidget):
         # File-Watcher für sprites/ Ordner aktivieren
         if sprites_folder.exists():
             self.file_watcher.addPath(str(sprites_folder))
-            # Verbindung herstellen (trennen falls bereits verbunden, dann neu verbinden)
-            # Alle Verbindungen trennen (ohne Argument = alle), um RuntimeWarning zu vermeiden
-            import warnings
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", RuntimeWarning)
-                try:
-                    # Alle Verbindungen zum directoryChanged Signal trennen
-                    self.file_watcher.directoryChanged.disconnect()
-                except (TypeError, RuntimeError):
-                    pass  # War noch nicht verbunden - das ist OK
-            
-            # Signal verbinden
-            self.file_watcher.directoryChanged.connect(self._on_sprites_folder_changed)
             print(f"[Asset Browser] Überwache sprites/ Ordner: {sprites_folder}")
             # Beim Laden einmal prüfen ob Bilder im sprites/ Ordner sind
             QTimer.singleShot(1000, self._process_sprites_folder)
         
+        # File-Watcher für assets/images/ Ordner aktivieren (für automatisches Löschen)
+        images_dir = project_path / "assets" / "images"
+        if images_dir.exists():
+            self.file_watcher.addPath(str(images_dir))
+            print(f"[Asset Browser] Überwache assets/images/ Ordner: {images_dir}")
+        
+        # Verbindung herstellen (trennen falls bereits verbunden, dann neu verbinden)
+        # Alle Verbindungen trennen (ohne Argument = alle), um RuntimeWarning zu vermeiden
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            try:
+                # Alle Verbindungen zum directoryChanged Signal trennen
+                self.file_watcher.directoryChanged.disconnect()
+            except (TypeError, RuntimeError):
+                pass  # War noch nicht verbunden - das ist OK
+        
+        # Signal verbinden (für beide Ordner)
+        self.file_watcher.directoryChanged.connect(self._on_folder_changed)
+        
         self._load_assets()
+    
+    def _refresh_assets(self):
+        """Aktualisiert den Asset Browser manuell"""
+        self._load_assets()
+        print("[Asset Browser] Asset Browser manuell aktualisiert")
     
     def _load_assets(self):
         """Lädt verfügbare Assets aus assets/images (rekursiv)"""
@@ -305,14 +348,92 @@ class AssetBrowser(QWidget):
                     subprocess.Popen(f'explorer "{folder_path}"', shell=True)
             open_explorer_action.triggered.connect(open_in_explorer)
             
+            # Umbenennen-Option
+            rename_action = menu.addAction("Umbenennen")
+            def rename_asset():
+                # Dialog mit nur Dateiname ohne Endung markiert
+                dialog = QDialog(self)
+                dialog.setWindowTitle("Asset umbenennen")
+                dialog.setModal(True)
+                
+                layout = QVBoxLayout()
+                
+                label = QLabel(f"Neuer Name für {img_path.name}:")
+                layout.addWidget(label)
+                
+                # Dateiname ohne Endung
+                file_stem = img_path.stem
+                file_suffix = img_path.suffix
+                
+                line_edit = QLineEdit()
+                line_edit.setText(file_stem)
+                # Nur den Namen ohne Endung markieren
+                line_edit.selectAll()
+                layout.addWidget(line_edit)
+                
+                button_layout = QHBoxLayout()
+                ok_button = QPushButton("OK")
+                cancel_button = QPushButton("Abbrechen")
+                button_layout.addWidget(ok_button)
+                button_layout.addWidget(cancel_button)
+                layout.addLayout(button_layout)
+                
+                dialog.setLayout(layout)
+                
+                ok_button.clicked.connect(dialog.accept)
+                cancel_button.clicked.connect(dialog.reject)
+                
+                # Fokus auf LineEdit setzen und Text markieren
+                line_edit.setFocus()
+                line_edit.selectAll()
+                
+                if dialog.exec() == QDialog.Accepted:
+                    new_name = line_edit.text().strip()
+                    if new_name and new_name != file_stem:
+                        # Neuer Dateiname mit Endung
+                        new_file_name = new_name + file_suffix
+                        new_path = img_path.parent / new_file_name
+                        
+                        # Prüfen ob Datei bereits existiert
+                        if new_path.exists() and new_path != img_path:
+                            QMessageBox.warning(self, "Fehler", f"Eine Datei mit dem Namen '{new_file_name}' existiert bereits!")
+                            return
+                        
+                        try:
+                            # Datei umbenennen
+                            old_path_str = str(img_path)
+                            img_path.rename(new_path)
+                            # Frame aus asset_frames entfernen (wird beim Neuladen neu erstellt)
+                            if old_path_str in self.asset_frames:
+                                del self.asset_frames[old_path_str]
+                            # Asset Browser neu laden
+                            self._load_assets()
+                            self.assets_updated.emit()
+                            print(f"[Asset Browser] Asset umbenannt: {img_path.name} -> {new_file_name}")
+                        except Exception as e:
+                            QMessageBox.critical(self, "Fehler", f"Fehler beim Umbenennen:\n{e}")
+            
+            rename_action.triggered.connect(rename_asset)
+            
+            menu.addSeparator()
+            
             # Details-Menü entfernt (erzeugte Ping-Sound)
             
             # Menü anzeigen (ohne Sound)
             menu.exec(event.globalPos())
             
-            # Nach Rechtsklick-Menü: Highlight wiederherstellen
-            self._clear_selection()
-            item_frame.setStyleSheet("border: 2px solid #4a9eff; background-color: #808080; padding: 5px;")
+            # Nach Rechtsklick-Menü: Highlight wiederherstellen (nur wenn Frame noch existiert)
+            try:
+                # Prüfen ob Frame noch existiert (wurde möglicherweise durch _load_assets() gelöscht)
+                if item_frame and str(img_path) in self.asset_frames:
+                    self._clear_selection()
+                    item_frame.setStyleSheet("border: 2px solid #4a9eff; background-color: #808080; padding: 5px;")
+                else:
+                    # Frame wurde gelöscht (z.B. nach Umbenennen) - nur Selection clearen
+                    self._clear_selection()
+            except RuntimeError:
+                # Frame wurde bereits gelöscht - ignorieren
+                pass
         
         # Linksklick: Auswahl (überall im Frame)
         def on_frame_click(event):
@@ -355,8 +476,18 @@ class AssetBrowser(QWidget):
     
     def _clear_selection(self):
         """Setzt alle Asset-Frames auf Standard-Style zurück"""
-        for frame in self.asset_frames.values():
-            frame.setStyleSheet("border: 1px solid #ccc; padding: 5px; background-color: transparent;")
+        # Liste der Frames kopieren, da sich asset_frames während der Iteration ändern kann
+        frames_to_clear = list(self.asset_frames.items())
+        for path_str, frame in frames_to_clear:
+            try:
+                # Prüfen ob Frame noch existiert (nicht gelöscht wurde)
+                # Versuche auf das Widget zuzugreifen - wenn es gelöscht wurde, gibt es RuntimeError
+                _ = frame.objectName()  # Einfacher Zugriff um zu prüfen ob Widget noch existiert
+                frame.setStyleSheet("border: 1px solid #ccc; padding: 5px; background-color: transparent;")
+            except (RuntimeError, AttributeError):
+                # Frame wurde bereits gelöscht - aus Dictionary entfernen
+                if path_str in self.asset_frames:
+                    del self.asset_frames[path_str]
     
     def _select_asset(self, file_path: str):
         """Selektiert/Highlightet ein Asset anhand des Dateipfads"""
@@ -607,13 +738,27 @@ class AssetBrowser(QWidget):
         else:
             event.ignore()
     
-    def _on_sprites_folder_changed(self, path: str):
-        """Wird aufgerufen wenn sich der sprites/ Ordner ändert"""
-        # Verzögertes Neuladen (verhindert zu häufige Updates)
-        self.reload_timer.stop()
-        self.reload_timer.timeout.disconnect()
-        self.reload_timer.timeout.connect(self._process_sprites_folder)
-        self.reload_timer.start(500)  # 500ms Verzögerung
+    def _on_folder_changed(self, path: str):
+        """Wird aufgerufen wenn sich ein überwachter Ordner ändert"""
+        if not self.project_path:
+            return
+        
+        path_obj = Path(path)
+        sprites_folder = self.project_path / "sprites"
+        images_dir = self.project_path / "assets" / "images"
+        
+        # Prüfen welcher Ordner sich geändert hat
+        if path_obj == sprites_folder or str(path_obj) == str(sprites_folder):
+            # sprites/ Ordner geändert - verarbeite neue Sprites
+            self.reload_timer.stop()
+            self.reload_timer.timeout.disconnect()
+            self.reload_timer.timeout.connect(self._process_sprites_folder)
+            self.reload_timer.start(500)  # 500ms Verzögerung
+        elif path_obj == images_dir or str(path_obj) == str(images_dir):
+            # assets/images/ Ordner geändert - aktualisiere Asset Browser
+            # Verzögertes Neuladen (verhindert zu häufige Updates)
+            self.assets_reload_timer.stop()
+            self.assets_reload_timer.start(500)  # 500ms Verzögerung
     
     def _process_sprites_folder(self):
         """Verarbeitet neue Bilder im sprites/ Ordner"""

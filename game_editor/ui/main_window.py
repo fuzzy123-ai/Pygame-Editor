@@ -306,8 +306,9 @@ class EditorMainWindow(QMainWindow):
         
         # Linker Bereich: Asset Browser
         self.asset_browser = AssetBrowser()
-        self.asset_browser.setMaximumWidth(360)  # 60px breiter (300 + 60)
-        self.asset_browser.setMinimumWidth(150)  # Mindestbreite damit es sichtbar bleibt
+        # Breitere Einstellungen für Asset Browser
+        self.asset_browser.setMinimumWidth(250)  # Mindestbreite erhöht
+        self.asset_browser.setMaximumWidth(400)  # Maximale Breite erhöht
         main_splitter.addWidget(self.asset_browser)
         
         # Mittlerer Bereich: Scene Canvas (komplett, kein Inspector mehr)
@@ -325,6 +326,10 @@ class EditorMainWindow(QMainWindow):
         main_splitter.setStretchFactor(0, 0)  # Asset Browser fix
         main_splitter.setStretchFactor(1, 1)  # Canvas nimmt restlichen Platz
         main_splitter.setStretchFactor(2, 0)  # Code Editor fix
+        
+        # Splitter-Größen explizit setzen (nachdem alle Widgets hinzugefügt wurden)
+        # Asset Browser auf 300px Breite setzen (Standard)
+        QTimer.singleShot(100, lambda: main_splitter.setSizes([300, 1000, 400]))
         
         # Splitter-Änderungen überwachen für visuelle Indikatoren
         self.main_splitter = main_splitter
@@ -376,6 +381,9 @@ class EditorMainWindow(QMainWindow):
         if self.code_editor:
             self.code_editor.set_undo_redo_manager(self.undo_redo_manager)
             self.code_editor.undo_redo_changed.connect(self._update_undo_redo_buttons)
+            # Scene Canvas Referenz an Code-Editor übergeben (für Objekt-Updates)
+            if self.scene_canvas:
+                self.code_editor.scene_canvas = self.scene_canvas
             # Undo/Redo Buttons an Code-Editor übergeben
             if hasattr(self, 'undo_button') and hasattr(self, 'redo_button'):
                 self.code_editor.set_undo_redo_buttons(self.undo_button, self.redo_button)
@@ -564,11 +572,19 @@ class EditorMainWindow(QMainWindow):
         if self.code_editor:
             # Prüfen ob obj_data leer ist oder keine ID hat
             if not obj_data or not obj_data.get("id"):
-                # Kein Objekt ausgewählt - globale game.py anzeigen
-                self.code_editor.set_object(None, None)
+                # Kein Objekt ausgewählt - Code-Editor NICHT aktualisieren
+                # Der Code der letzten gewählten Figur bleibt angezeigt
+                return
             else:
                 # Objekt ausgewählt - Code für dieses Objekt anzeigen
-                self.code_editor.set_object(obj_data.get("id"), obj_data)
+                # Prüfen ob Objekt wirklich existiert
+                obj_id = obj_data.get("id")
+                if obj_id and self.scene_canvas:
+                    # Prüfen ob Objekt in der Szene existiert
+                    obj_exists = any(obj.get("id") == obj_id for obj in self.scene_canvas.objects)
+                    if obj_exists:
+                        self.code_editor.set_object(obj_id, obj_data)
+                    # Wenn Objekt nicht existiert, Code-Editor nicht aktualisieren
     
     def _on_assets_updated(self):
         """Wird aufgerufen wenn Assets im Asset Browser aktualisiert wurden"""
@@ -690,21 +706,29 @@ class EditorMainWindow(QMainWindow):
             env = os.environ.copy()
             env['PYTHONUNBUFFERED'] = '1'
             env['PYTHONIOENCODING'] = 'utf-8'  # Erzwingt UTF-8 für alle I/O-Operationen
+            # Windows-spezifisch: Setze auch die Console-Codepage auf UTF-8
+            if sys.platform == "win32":
+                env['PYTHONLEGACYWINDOWSSTDIO'] = '0'  # Verhindert Legacy-Encoding
             
             self.game_process = subprocess.Popen(
                 [sys.executable, "-u", "-m", "game_editor.engine.runtime", str(self.project_path)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,  # Beide Streams getrennt für sofortige Fehlererkennung
-                text=False,  # Binärmodus - wir dekodieren manuell
+                text=True,  # Text-Modus mit explizitem Encoding
+                encoding='utf-8',  # UTF-8 Encoding
+                errors='replace',  # Fehlerhafte Zeichen ersetzen statt Fehler zu werfen
                 bufsize=1,  # Line-buffered für sofortige Ausgabe
                 env=env
             )
             
-            # Output-Reader starten
+            # Output-Reader sofort starten, damit die Streams sofort gelesen werden
+            # Das verhindert, dass Python's interne Threads die Daten mit falschem Encoding lesen
             self.output_reader = GameOutputReader(self.game_process)
             self.output_reader.output_received.connect(self.console.append_output)
             self.output_reader.error_received.connect(self.console.append_error)
             self.output_reader.finished.connect(self._on_game_finished)
+            # Thread sofort starten, damit Streams sofort gelesen werden
+            # WICHTIG: Muss sofort nach Popen() aufgerufen werden, bevor Python's interne Threads starten
             self.output_reader.start()
             
             self.run_button.setEnabled(False)

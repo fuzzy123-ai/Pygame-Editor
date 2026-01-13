@@ -4,6 +4,7 @@ Runtime Engine - Pygame Game Loop und Schüler-Code Ausführung
 import pygame
 import sys
 import json
+import warnings
 from pathlib import Path
 from typing import Optional, Dict, Any
 from .loader import load_project, load_scene, create_objects_from_scene
@@ -11,6 +12,9 @@ from .gameobject import GameObject
 from .api import (_init_api, _update_key_states, get_debug_output, 
                   clear_debug_output, print_debug, get_object, get_all_objects,
                   key_pressed, key_down, mouse_position, spawn_object)
+
+# libpng Warnungen unterdrücken (iCCP: known incorrect sRGB profile)
+warnings.filterwarnings("ignore", category=UserWarning, message=".*iCCP.*")
 
 # Fehler-Übersetzungen (Deutsch)
 ERROR_TRANSLATIONS: Dict[str, str] = {

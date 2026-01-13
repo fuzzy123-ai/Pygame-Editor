@@ -41,6 +41,8 @@ def is_instance_running() -> bool:
                     ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV"],
                     capture_output=True,
                     text=True,
+                    encoding='utf-8',
+                    errors='replace',  # Fehlerhafte Zeichen ersetzen
                     timeout=2
                 )
                 if str(pid) in result.stdout:
@@ -49,6 +51,8 @@ def is_instance_running() -> bool:
                         ["wmic", "process", "where", f"ProcessId={pid}", "get", "CommandLine"],
                         capture_output=True,
                         text=True,
+                        encoding='utf-8',
+                        errors='replace',  # Fehlerhafte Zeichen ersetzen
                         timeout=2
                     )
                     if "game_editor.editor" in result2.stdout:

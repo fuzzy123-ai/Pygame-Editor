@@ -2,7 +2,7 @@
 Scene Canvas - 2D Canvas für Objekte mit Drag & Drop, Zoom, Game Preview
 """
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QHBoxLayout, 
-                                QPushButton, QSlider, QComboBox, QMenu)
+                                QPushButton, QSlider, QComboBox, QMenu, QInputDialog)
 from PySide6.QtCore import Qt, Signal, QPoint, QRect, QTimer, QMimeData
 from PySide6.QtGui import QPainter, QPaintEvent, QColor, QPen, QBrush, QPixmap, QImage, QWheelEvent, QContextMenuEvent, QDrag
 from pathlib import Path
@@ -288,6 +288,87 @@ class SceneCanvas(QWidget):
             except Exception:
                 pass  # Standard-Werte beibehalten
     
+    def _validate_and_cleanup_objects(self):
+        """Validiert und bereinigt Objekte - entfernt ungültige Objekte stillschweigend"""
+        if not isinstance(self.objects, list):
+            # Wenn objects keine Liste ist, leere Liste erstellen
+            self.objects = []
+            return
+        
+        valid_objects = []
+        removed_count = 0
+        
+        for obj in self.objects:
+            # Prüfen ob Objekt ein Dictionary ist
+            if not isinstance(obj, dict):
+                removed_count += 1
+                continue
+            
+            # Prüfen ob Objekt eine ID hat (wird später von _cleanup_duplicate_ids_and_names repariert)
+            if not obj.get("id"):
+                # Objekt ohne ID - versuche zu reparieren, sonst entfernen
+                obj["id"] = self._generate_unique_id()
+            
+            # Prüfen und reparieren von x, y, width, height
+            try:
+                obj["x"] = int(obj.get("x", 0))
+                obj["y"] = int(obj.get("y", 0))
+                obj["width"] = max(1, int(obj.get("width", self.grid_size)))
+                obj["height"] = max(1, int(obj.get("height", self.grid_size)))
+            except (ValueError, TypeError):
+                # Ungültige Werte - Standardwerte setzen
+                obj["x"] = 0
+                obj["y"] = 0
+                obj["width"] = self.grid_size
+                obj["height"] = self.grid_size
+            
+            # Layer validieren
+            if "layer" not in obj or not isinstance(obj.get("layer"), str):
+                obj["layer"] = "default"
+            
+            # Collider validieren
+            if "collider" in obj:
+                if not isinstance(obj["collider"], dict):
+                    obj["collider"] = {"enabled": False, "type": "rect"}
+                else:
+                    # Sicherstellen dass collider die notwendigen Felder hat
+                    if "enabled" not in obj["collider"]:
+                        obj["collider"]["enabled"] = False
+                    if "type" not in obj["collider"]:
+                        obj["collider"]["type"] = "rect"
+            else:
+                obj["collider"] = {"enabled": False, "type": "rect"}
+            
+            # Ground validieren
+            if "ground" not in obj:
+                obj["ground"] = False
+            elif not isinstance(obj["ground"], bool):
+                obj["ground"] = bool(obj["ground"])
+            
+            # Type validieren (optional)
+            if "type" not in obj:
+                obj["type"] = "sprite"
+            
+            # Objekt ist gültig - behalten
+            valid_objects.append(obj)
+        
+        if removed_count > 0 or len(valid_objects) != len(self.objects):
+            self.objects = valid_objects
+            
+            # Auswahl bereinigen - entferne IDs die nicht mehr existieren
+            valid_ids = {obj.get("id") for obj in valid_objects if obj.get("id")}
+            self.selected_object_ids = [obj_id for obj_id in self.selected_object_ids if obj_id in valid_ids]
+            
+            if self.selected_object_id and self.selected_object_id not in valid_ids:
+                self.selected_object_id = None
+                self.object_selected.emit({})
+            elif self.selected_object_ids and not self.selected_object_id:
+                # Wenn selected_object_ids noch Werte hat, aber selected_object_id None ist, setze es
+                self.selected_object_id = self.selected_object_ids[0] if self.selected_object_ids else None
+            
+            if self.console:
+                self.console.append_debug(f"[Canvas] {removed_count} ungültige Objekt(e) entfernt, Auswahl bereinigt")
+    
     def _cleanup_duplicate_ids_and_names(self):
         """Bereinigt doppelte IDs und Namen in der Objekt-Liste"""
         seen_ids = set()
@@ -373,6 +454,9 @@ class SceneCanvas(QWidget):
         
         self.objects = self.scene_data.get("objects", [])
         
+        # Objekte validieren und bereinigen (entfernt ungültige Objekte)
+        self._validate_and_cleanup_objects()
+        
         # Doppelte IDs und Namen bereinigen
         self._cleanup_duplicate_ids_and_names()
         
@@ -414,11 +498,35 @@ class SceneCanvas(QWidget):
             config = json.load(f)
         
         start_scene = config.get("start_scene", "level1")
+        scene_file = self.project_path / "scenes" / f"{start_scene}.json"
+        
+        # WICHTIG: Code aus JSON-Datei behalten (falls vorhanden)
+        # Beim Speichern müssen wir die JSON-Datei zuerst laden, um den Code zu behalten
+        saved_objects_by_id = {}
+        if scene_file.exists():
+            try:
+                with open(scene_file, 'r', encoding='utf-8') as f:
+                    saved_scene_data = json.load(f)
+                    saved_objects = saved_scene_data.get("objects", [])
+                    # Code aus gespeicherten Objekten behalten
+                    for saved_obj in saved_objects:
+                        obj_id = saved_obj.get("id")
+                        if obj_id and "code" in saved_obj:
+                            saved_objects_by_id[obj_id] = saved_obj.get("code")
+            except Exception:
+                pass  # Bei Fehler ignorieren
         
         # Alle Sprite-Pfade zu relativen Pfaden konvertieren
         objects_to_save = []
         for obj in self.objects:
             obj_copy = obj.copy()
+            obj_id = obj_copy.get("id")
+            
+            # Code aus gespeicherter JSON-Datei übernehmen (falls vorhanden)
+            # Das stellt sicher, dass Code-Änderungen im Code-Editor nicht überschrieben werden
+            if obj_id and obj_id in saved_objects_by_id:
+                obj_copy["code"] = saved_objects_by_id[obj_id]
+            
             sprite_path = obj_copy.get("sprite")
             if sprite_path:
                 try:
@@ -440,7 +548,6 @@ class SceneCanvas(QWidget):
             objects_to_save.append(obj_copy)
         
         # Szene speichern
-        scene_file = self.project_path / "scenes" / f"{start_scene}.json"
         scene_file.parent.mkdir(parents=True, exist_ok=True)
         
         scene_data_to_save = self.scene_data.copy()
@@ -533,6 +640,11 @@ class SceneCanvas(QWidget):
         if clicked_obj:
             clicked_obj_id = clicked_obj.get("id")
             
+            # WICHTIG: Prüfen ob Objekt wirklich in der Szene existiert
+            if not clicked_obj_id or clicked_obj_id not in [obj.get("id") for obj in self.objects]:
+                # Objekt existiert nicht - nichts tun
+                return
+            
             # Shift-Taste: Mehrfachauswahl
             modifiers = getattr(self, '_mouse_modifiers', Qt.NoModifier)
             if modifiers & Qt.ShiftModifier:
@@ -580,10 +692,13 @@ class SceneCanvas(QWidget):
             modifiers = getattr(self, '_mouse_modifiers', Qt.NoModifier)
             if not (modifiers & Qt.ShiftModifier):
                 self.selected_object_ids = []
+                # WICHTIG: selected_object_id auf None setzen, aber KEIN Signal senden
+                # Der Code-Editor behält den Code der letzten gewählten Figur
+                old_selected_id = self.selected_object_id
                 self.selected_object_id = None
                 self.dragging = False
                 self.drag_object_id = None
-                self.object_selected.emit({})  # Leeres Dictionary = keine Auswahl
+                # KEIN object_selected.emit({}) - Code-Editor bleibt unverändert
                 # Drag-Start-Positionen löschen
                 if hasattr(self, '_drag_start_positions'):
                     delattr(self, '_drag_start_positions')
@@ -1332,6 +1447,80 @@ class SceneCanvas(QWidget):
         self.save_scene()
         self.canvas.update()
     
+    def _rename_objects_multiple(self, obj_ids: List[str]):
+        """Benennt mehrere Objekte um"""
+        if not obj_ids:
+            return
+        
+        # Objekte finden
+        objects_to_rename = []
+        for obj_id in obj_ids:
+            obj = next((o for o in self.objects if o.get("id") == obj_id), None)
+            if obj:
+                objects_to_rename.append(obj)
+        
+        if not objects_to_rename:
+            return
+        
+        # Dialog für neuen Namen
+        if len(objects_to_rename) == 1:
+            # Einzelnes Objekt: Aktueller Name als Vorschlag
+            current_name = objects_to_rename[0].get("name", "")
+            if not current_name:
+                current_name = objects_to_rename[0].get("id", "")
+            new_name, ok = QInputDialog.getText(
+                self,
+                "Objekt umbenennen",
+                "Neuer Name:",
+                text=current_name
+            )
+            if ok and new_name.strip():
+                # Objekt umbenennen
+                from ..utils.commands import ObjectPropertyChangeCommand
+                old_name = objects_to_rename[0].get("name", "")
+                objects_to_rename[0]["name"] = new_name.strip()
+                if self.undo_redo_manager:
+                    command = ObjectPropertyChangeCommand(
+                        objects_to_rename[0],
+                        "name",
+                        old_name,
+                        new_name.strip(),
+                        lambda: (self.canvas.update(), self.save_scene())
+                    )
+                    self.undo_redo_manager.execute_command(command)
+                    self.undo_redo_changed.emit()
+                self.save_scene()
+                self.canvas.update()
+        else:
+            # Mehrere Objekte: Basis-Name eingeben, wird durchnummeriert
+            base_name, ok = QInputDialog.getText(
+                self,
+                "Objekte umbenennen",
+                f"Basis-Name für {len(objects_to_rename)} Objekte:\n(Objekte werden als 'Name (1)', 'Name (2)', etc. benannt)",
+                text=""
+            )
+            if ok and base_name.strip():
+                # Alle Objekte umbenennen mit Nummerierung
+                from ..utils.commands import ObjectPropertyChangeCommand
+                base_name = base_name.strip()
+                for idx, obj in enumerate(objects_to_rename, 1):
+                    old_name = obj.get("name", "")
+                    new_name = f"{base_name} ({idx})"
+                    obj["name"] = new_name
+                    if self.undo_redo_manager:
+                        command = ObjectPropertyChangeCommand(
+                            obj,
+                            "name",
+                            old_name,
+                            new_name,
+                            lambda: (self.canvas.update(), self.save_scene())
+                        )
+                        self.undo_redo_manager.execute_command(command)
+                if self.undo_redo_manager:
+                    self.undo_redo_changed.emit()
+                self.save_scene()
+                self.canvas.update()
+    
     def _start_duplicate_preview(self, obj_ids: List[str]):
         """Startet den Duplizieren-Vorschau-Modus"""
         if not obj_ids:
@@ -1364,9 +1553,53 @@ class SceneCanvas(QWidget):
         if not self._duplicate_preview_mode or not self._duplicate_preview_objects:
             return
         
+        # Debug-Ausgabe entfernt - funktioniert jetzt korrekt
+        
         new_objects = []
         
-        for preview_data in self._duplicate_preview_objects:
+        # Original-Objekte-IDs sammeln (einmalig, außerhalb der Schleife)
+        original_obj_ids = {preview_data["original"].get("id") for preview_data in self._duplicate_preview_objects}
+        
+        # Hilfsfunktion: Prüft ob eine Grid-Position frei ist
+        def is_position_free(grid_cell_x: int, grid_cell_y: int, exclude_new_objects: list = None) -> bool:
+            """Prüft ob eine Grid-Position frei ist"""
+            if exclude_new_objects is None:
+                exclude_new_objects = []
+            
+            # Prüfe gegen bestehende Objekte (aber ignoriere Original-Objekte, die gerade dupliziert werden)
+            for other_obj in self.objects:
+                other_id = other_obj.get("id")
+                # Ignoriere Original-Objekte, die gerade dupliziert werden
+                if other_id in original_obj_ids:
+                    continue
+                    
+                other_x = other_obj.get("x", 0)
+                other_y = other_obj.get("y", 0)
+                other_grid_x = other_x // self.grid_size
+                other_grid_y = other_y // self.grid_size
+                if other_grid_x == grid_cell_x and other_grid_y == grid_cell_y:
+                    return False
+            
+            # Prüfe auch gegen bereits in dieser Runde hinzugefügte Objekte
+            for already_added in exclude_new_objects:
+                other_x = already_added.get("x", 0)
+                other_y = already_added.get("y", 0)
+                other_grid_x = other_x // self.grid_size
+                other_grid_y = other_y // self.grid_size
+                if other_grid_x == grid_cell_x and other_grid_y == grid_cell_y:
+                    return False
+            
+            return True
+        
+        # WICHTIG: Sammle bereits generierte IDs, damit keine doppelten IDs erstellt werden
+        generated_ids = set()  # IDs die bereits für neue Objekte generiert wurden
+        
+        # WICHTIG: Wenn mehrere Objekte an der gleichen Position sind (z.B. Offset = 0),
+        # müssen wir sie automatisch verschieben, damit alle platziert werden können
+        # Sammle alle Ziel-Positionen und verschiebe Objekte, die an der gleichen Position landen würden
+        position_usage = {}  # Dict: (grid_cell_x, grid_cell_y) -> count
+        
+        for idx, preview_data in enumerate(self._duplicate_preview_objects):
             obj_copy = preview_data["copy"]
             start_pos = preview_data["start_pos"]
             offset = self._duplicate_preview_offset
@@ -1381,46 +1614,117 @@ class SceneCanvas(QWidget):
             grid_x = int(grid_x)
             grid_y = int(grid_y)
             
-            # Prüfen ob Position frei ist (gegen bestehende Objekte UND bereits hinzugefügte neue Objekte)
-            # WICHTIG: Original-Objekte, die gerade dupliziert werden, ausschließen
-            original_obj_ids = {preview_data["original"].get("id") for preview_data in self._duplicate_preview_objects}
+            grid_cell_x = grid_x // self.grid_size
+            grid_cell_y = grid_y // self.grid_size
+            
+            # Zähle wie viele Objekte an dieser Position landen würden
+            pos_key = (grid_cell_x, grid_cell_y)
+            position_usage[pos_key] = position_usage.get(pos_key, 0) + 1
+        
+        # Jetzt platziere alle Objekte
+        position_offsets = {}  # Dict: (grid_cell_x, grid_cell_y) -> offset_index
+        
+        for idx, preview_data in enumerate(self._duplicate_preview_objects):
+            obj_copy = preview_data["copy"]
+            start_pos = preview_data["start_pos"]
+            offset = self._duplicate_preview_offset
+            
+            # Neue Position berechnen
+            new_x = start_pos.x() + offset.x()
+            new_y = start_pos.y() + offset.y()
+            
+            # An Grid ausrichten
+            grid_x = (new_x // self.grid_size) * self.grid_size
+            grid_y = (new_y // self.grid_size) * self.grid_size
+            grid_x = int(grid_x)
+            grid_y = int(grid_y)
             
             grid_cell_x = grid_x // self.grid_size
             grid_cell_y = grid_y // self.grid_size
-            position_free = True
             
-            # Prüfe gegen bestehende Objekte (aber ignoriere Original-Objekte, die gerade dupliziert werden)
-            for other_obj in self.objects:
-                other_id = other_obj.get("id")
-                # Ignoriere Original-Objekte, die gerade dupliziert werden
-                if other_id in original_obj_ids:
-                    continue
-                    
-                other_x = other_obj.get("x", 0)
-                other_y = other_obj.get("y", 0)
-                other_grid_x = other_x // self.grid_size
-                other_grid_y = other_y // self.grid_size
-                if other_grid_x == grid_cell_x and other_grid_y == grid_cell_y:
-                    position_free = False
-                    break
+            # Prüfen ob Position frei ist (gegen bestehende Objekte)
+            position_free = is_position_free(grid_cell_x, grid_cell_y, new_objects)
             
-            # Prüfe auch gegen bereits in dieser Runde hinzugefügte Objekte
-            if position_free:
-                for already_added in new_objects:
-                    other_x = already_added.get("x", 0)
-                    other_y = already_added.get("y", 0)
-                    other_grid_x = other_x // self.grid_size
-                    other_grid_y = other_y // self.grid_size
-                    if other_grid_x == grid_cell_x and other_grid_y == grid_cell_y:
-                        position_free = False
-                        break
+            # Wenn mehrere Objekte an der gleichen Position landen würden, verschiebe sie
+            pos_key = (grid_cell_x, grid_cell_y)
+            if pos_key in position_offsets:
+                # Diese Position wurde bereits für ein anderes Objekt verwendet
+                # Finde eine freie Position in der Nähe
+                position_free = False
+            else:
+                # Erste Verwendung dieser Position - speichere den Offset-Index
+                position_offsets[pos_key] = 0
             
+            # Wenn Position belegt ist, versuche nächste freie Position zu finden
             if not position_free:
-                continue  # Überspringe dieses Objekt wenn Position belegt
+                found_free = False
+                search_radius = 1
+                max_radius = 10  # Größerer Radius für mehr Objekte
+                
+                while not found_free and search_radius <= max_radius:
+                    # Spiral-Suche: Starte oben, dann im Uhrzeigersinn
+                    search_pattern = []
+                    for r in range(1, search_radius + 1):
+                        # Oben
+                        search_pattern.append((0, -r))
+                        # Rechts
+                        search_pattern.append((r, 0))
+                        # Unten
+                        search_pattern.append((0, r))
+                        # Links
+                        search_pattern.append((-r, 0))
+                        # Diagonalen
+                        if r > 1:
+                            search_pattern.append((r-1, -r+1))
+                            search_pattern.append((r-1, r-1))
+                            search_pattern.append((-r+1, r-1))
+                            search_pattern.append((-r+1, -r+1))
+                    
+                    for dx, dy in search_pattern:
+                        test_cell_x = grid_cell_x + dx
+                        test_cell_y = grid_cell_y + dy
+                        if is_position_free(test_cell_x, test_cell_y, new_objects):
+                            grid_cell_x = test_cell_x
+                            grid_cell_y = test_cell_y
+                            grid_x = test_cell_x * self.grid_size
+                            grid_y = test_cell_y * self.grid_size
+                            found_free = True
+                            break
+                    
+                    search_radius += 1
+                
+                # Wenn immer noch keine freie Position gefunden, überspringe dieses Objekt
+                if not found_free:
+                    continue
             
             # Neues Objekt erstellen
             new_obj = obj_copy.copy()
-            new_obj["id"] = self._generate_unique_id()
+            # Eindeutige ID generieren (berücksichtige bereits generierte IDs)
+            existing_ids = {obj.get("id") for obj in self.objects if obj.get("id")}
+            existing_ids.update(generated_ids)  # Auch bereits generierte IDs berücksichtigen
+            
+            # Finde die höchste Nummer aus allen existierenden IDs
+            max_num = 0
+            for existing_id in existing_ids:
+                if existing_id and existing_id.startswith("object_"):
+                    try:
+                        num_str = existing_id.replace("object_", "")
+                        num = int(num_str)
+                        max_num = max(max_num, num)
+                    except ValueError:
+                        pass
+            
+            # Starte mit der nächsten Nummer
+            base_num = max_num + 1
+            obj_id = f"object_{base_num}"
+            counter = 1
+            while obj_id in existing_ids:
+                obj_id = f"object_{base_num + counter}"
+                counter += 1
+            
+            new_obj["id"] = obj_id
+            generated_ids.add(obj_id)  # ID als generiert markieren
+            
             # Namen aktualisieren - wenn kein Name vorhanden, ID als Basis verwenden
             base_name = new_obj.get("name", "")
             if not base_name or not base_name.strip():
@@ -1558,7 +1862,14 @@ class CanvasWidget(QWidget):
             # Menü erstellen
             menu = QMenu(self)
             
-            # Anzahl der ausgewählten Objekte anzeigen
+            # Objekt-ID als allerersten Eintrag anzeigen (grau, deaktiviert)
+            obj_id_display = clicked_obj.get("id", "unbekannt")
+            id_action = menu.addAction(f"ID: {obj_id_display}")
+            id_action.setEnabled(False)  # Grau, nicht klickbar
+            
+            menu.addSeparator()
+            
+            # Anzahl der ausgewählten Objekte anzeigen (nur wenn mehr als eins)
             selected_count = len(self.parent_canvas.selected_object_ids)
             if selected_count > 1:
                 menu.addAction(f"{selected_count} Objekte ausgewählt").setEnabled(False)
@@ -1574,6 +1885,12 @@ class CanvasWidget(QWidget):
             delete_action = menu.addAction("Löschen")
             delete_action.triggered.connect(
                 lambda: self.parent_canvas._delete_objects_multiple(self.parent_canvas.selected_object_ids)
+            )
+            
+            # Umbenennen-Option (nach Löschen)
+            rename_action = menu.addAction("Umbenennen")
+            rename_action.triggered.connect(
+                lambda: self.parent_canvas._rename_objects_multiple(self.parent_canvas.selected_object_ids)
             )
             
             menu.addSeparator()

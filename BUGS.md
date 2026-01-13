@@ -2,64 +2,63 @@
 
 ## Bug #1: Duplizieren mehrerer Objekte platziert nur ein Objekt
 
-**Status:** Offen  
+**Status:** Behoben  
 **Priorität:** Hoch  
-**Datum:** 2024
+**Datum:** 2024  
+**Behoben:** 2024
 
 ### Beschreibung
 Wenn mehrere Objekte ausgewählt und per Rechtsklick → "Duplizieren" dupliziert werden, werden zwar alle Objekte in der Vorschau angezeigt, aber beim Platzieren (Klick) wird nur ein Objekt tatsächlich in die Szene eingefügt.
 
-### Schritte zur Reproduktion
-1. Mehrere Objekte im Canvas auswählen (Shift+Klick)
-2. Rechtsklick auf eines der ausgewählten Objekte
-3. "Duplizieren" auswählen
-4. Vorschau zeigt alle Objekte korrekt an
-5. Auf Canvas klicken, um Objekte zu platzieren
-6. **Erwartet:** Alle Objekte werden platziert
-7. **Tatsächlich:** Nur ein Objekt wird platziert
+### Lösung
+Die Position-Prüfung wurde verbessert: Wenn eine Position belegt ist, wird automatisch in einem 5x5 Grid um die ursprüngliche Position herum nach einer freien Position gesucht. Dies stellt sicher, dass alle Objekte platziert werden, auch wenn einige Positionen belegt sind.
 
 ### Technische Details
 - Datei: `game_editor/ui/scene_canvas.py`
 - Methode: `_place_duplicate_preview()`
-- Problem: Position-Prüfung überspringt Objekte, die an bereits belegten Positionen platziert werden sollen
-- Versuchte Fixes:
-  - Original-Objekte von Position-Prüfung ausgeschlossen
-  - Prüfung gegen bereits hinzugefügte Objekte hinzugefügt
-  - `ObjectAddMultipleCommand` erstellt für Batch-Operationen
-
-### Workaround
-Einzelne Objekte nacheinander duplizieren.
-
-### Zugehörige Commits
-- Versuche zur Behebung wurden unternommen, aber Bug besteht weiterhin
+- Fix: Suche nach alternativen Positionen in einem 5x5 Grid, wenn die ursprüngliche Position belegt ist
 
 ---
 
 ## Bug #2: Asset Browser bleibt zu schmal trotz mehrfacher Änderungen
 
-**Status:** Offen  
+**Status:** Behoben  
 **Priorität:** Mittel  
-**Datum:** 2024
+**Datum:** 2024  
+**Behoben:** 2024
 
 ### Beschreibung
 Der Asset Browser bleibt trotz mehrfacher Versuche, die Breite zu erhöhen (z.B. `setMaximumWidth(360)`), sehr schmal und bietet nicht genug Platz für die Anzeige von Assets.
 
-### Schritte zur Reproduktion
-1. Editor starten
-2. Asset Browser öffnen (links)
-3. **Erwartet:** Breiterer Asset Browser mit mehr Platz
-4. **Tatsächlich:** Asset Browser bleibt schmal
+### Lösung
+Die Breiten-Einstellungen wurden angepasst:
+- `setMinimumWidth(250)` (vorher 150)
+- `setMaximumWidth(400)` (vorher 360)
+- Splitter-Größen werden explizit auf 300px für Asset Browser gesetzt
 
 ### Technische Details
 - Datei: `game_editor/ui/main_window.py`
 - Methode: `_create_central_widget()`
-- Problem: `setMaximumWidth()` wird möglicherweise durch Layout-Constraints überschrieben
-- Versuchte Fixes:
-  - `setMaximumWidth(300)` → `setMaximumWidth(360)` erhöht
-  - Verschiedene Layout-Anpassungen
+- Fix: Erhöhte Mindest- und Maximalbreite, explizite Splitter-Größen-Setzung
 
-### Workaround
-Manuell die Splitter-Größe anpassen, um den Asset Browser zu verbreitern.
 
-### Zugehörige Commits
-- Mehrfache Versuche, die Breite zu erhöhen, aber Problem besteht weiterhin
+## Bug #3: Aktualisieren-Button und automatisches Löschen im Asset Browser
+
+**Status:** Behoben  
+**Priorität:** Mittel  
+**Datum:** 2024  
+**Behoben:** 2024
+
+### Beschreibung
+Ein kleiner Aktualisieren-Pfeil im Asset Browser fehlt. Wenn eine Datei über Windows gelöscht wird, sollte das automatisch passieren, sonst über den grünen Pfeil.
+
+### Lösung
+- Aktualisieren-Button (↻) wurde hinzugefügt mit grüner Farbe
+- File-Watcher wurde erweitert, um auch den `assets/images/` Ordner zu überwachen
+- Bei Datei-Löschung wird der Asset Browser automatisch aktualisiert (nach 500ms Verzögerung)
+- Manuelle Aktualisierung über den grünen Pfeil-Button möglich
+
+### Technische Details
+- Datei: `game_editor/ui/asset_browser.py`
+- Methoden: `_refresh_assets()`, `_on_folder_changed()`
+- Fix: File-Watcher überwacht jetzt `assets/images/` Ordner, automatische Aktualisierung bei Änderungen

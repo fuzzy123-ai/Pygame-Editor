@@ -28,23 +28,23 @@ class GameOutputReader(QThread):
         
         while self._running and self.process.poll() is None:
             try:
-                # Binärdaten lesen und manuell dekodieren
-                line_bytes = self.process.stdout.readline()
-                if line_bytes:
-                    # Manuell dekodieren mit Fehlerbehandlung
-                    try:
-                        decoded_line = line_bytes.decode('utf-8', errors='replace').rstrip('\n\r')
+                # Text-Daten lesen (bereits dekodiert durch subprocess)
+                # readline() blockiert, bis eine Zeile verfügbar ist oder EOF erreicht wird
+                line = self.process.stdout.readline()
+                if line:
+                    # Zeile ist bereits ein String (durch text=True)
+                    decoded_line = line.rstrip('\n\r')
+                    if decoded_line:  # Nur nicht-leere Zeilen senden
                         self.output_received.emit(decoded_line)
-                    except Exception:
-                        # Fallback: Versuche mit anderen Encodings
-                        try:
-                            decoded_line = line_bytes.decode('latin-1', errors='replace').rstrip('\n\r')
-                            self.output_received.emit(decoded_line)
-                        except Exception:
-                            pass  # Ignoriere fehlerhafte Zeilen komplett
                 elif self.process.poll() is not None:
                     # Prozess beendet, keine weiteren Daten
                     break
+            except (UnicodeDecodeError, ValueError) as e:
+                # Unicode-Fehler ignorieren (sollten nicht auftreten mit text=True)
+                # Aber falls doch, ignorieren wir sie
+                if self.process.poll() is not None:
+                    break
+                continue
             except Exception as e:
                 # Alle anderen Fehler ignorieren (z.B. wenn Prozess beendet wird)
                 if self.process.poll() is not None:
@@ -58,23 +58,23 @@ class GameOutputReader(QThread):
         
         while self._running and self.process.poll() is None:
             try:
-                # Binärdaten lesen und manuell dekodieren
-                line_bytes = self.process.stderr.readline()
-                if line_bytes:
-                    # Manuell dekodieren mit Fehlerbehandlung
-                    try:
-                        decoded_line = line_bytes.decode('utf-8', errors='replace').rstrip('\n\r')
+                # Text-Daten lesen (bereits dekodiert durch subprocess)
+                # readline() blockiert, bis eine Zeile verfügbar ist oder EOF erreicht wird
+                line = self.process.stderr.readline()
+                if line:
+                    # Zeile ist bereits ein String (durch text=True)
+                    decoded_line = line.rstrip('\n\r')
+                    if decoded_line:  # Nur nicht-leere Zeilen senden
                         self.error_received.emit(decoded_line)
-                    except Exception:
-                        # Fallback: Versuche mit anderen Encodings
-                        try:
-                            decoded_line = line_bytes.decode('latin-1', errors='replace').rstrip('\n\r')
-                            self.error_received.emit(decoded_line)
-                        except Exception:
-                            pass  # Ignoriere fehlerhafte Zeilen komplett
                 elif self.process.poll() is not None:
                     # Prozess beendet, keine weiteren Daten
                     break
+            except (UnicodeDecodeError, ValueError) as e:
+                # Unicode-Fehler ignorieren (sollten nicht auftreten mit text=True)
+                # Aber falls doch, ignorieren wir sie
+                if self.process.poll() is not None:
+                    break
+                continue
             except Exception as e:
                 # Alle anderen Fehler ignorieren (z.B. wenn Prozess beendet wird)
                 if self.process.poll() is not None:
@@ -84,14 +84,38 @@ class GameOutputReader(QThread):
     def run(self):
         """Startet Threads zum Lesen von stdout und stderr"""
         import sys
+        import select
+        import time
         
-        # Starte separate Threads für stdout und stderr
-        # Das ermöglicht sofortige Ausgabe beider Streams ohne Blockierung
+        # Starte separate Threads für stdout und stderr SOFORT
+        # Das verhindert, dass Python's interne subprocess Threads die Daten lesen
+        # WICHTIG: Threads müssen sofort starten, bevor Python's interne Threads die Streams lesen
+        
+        # Sofort einen ersten read() Aufruf machen, um die Streams zu "reservieren"
+        # Das verhindert, dass Python's interne Threads die Streams lesen
+        # WICHTIG: Dies muss VOR dem Starten der Threads passieren
         if self.process.stdout:
+            try:
+                # Sofort einen ersten read() Aufruf machen (non-blocking)
+                # Das "reserviert" den Stream für unseren Thread
+                # read(0) ist non-blocking und "reserviert" den Stream
+                _ = self.process.stdout.read(0)  # Non-blocking read
+            except (AttributeError, ValueError, OSError):
+                # Stream könnte bereits geschlossen sein oder nicht unterstützen
+                pass
+            
             self.stdout_thread = threading.Thread(target=self._read_stdout, daemon=True)
             self.stdout_thread.start()
         
         if self.process.stderr:
+            try:
+                # Sofort einen ersten read() Aufruf machen (non-blocking)
+                # Das "reserviert" den Stream für unseren Thread
+                _ = self.process.stderr.read(0)  # Non-blocking read
+            except (AttributeError, ValueError, OSError):
+                # Stream könnte bereits geschlossen sein oder nicht unterstützen
+                pass
+            
             self.stderr_thread = threading.Thread(target=self._read_stderr, daemon=True)
             self.stderr_thread.start()
         
@@ -110,35 +134,15 @@ class GameOutputReader(QThread):
             try:
                 stdout, stderr = self.process.communicate(timeout=0.5)
                 if stdout:
-                    # Binärdaten manuell dekodieren
-                    try:
-                        decoded_stdout = stdout.decode('utf-8', errors='replace')
-                        for line in decoded_stdout.splitlines():
-                            if line.strip():
-                                self.output_received.emit(line.strip())
-                    except Exception:
-                        try:
-                            decoded_stdout = stdout.decode('latin-1', errors='replace')
-                            for line in decoded_stdout.splitlines():
-                                if line.strip():
-                                    self.output_received.emit(line.strip())
-                        except Exception:
-                            pass
+                    # stdout ist bereits ein String (durch text=True)
+                    for line in stdout.splitlines():
+                        if line.strip():
+                            self.output_received.emit(line.strip())
                 if stderr:
-                    # Binärdaten manuell dekodieren
-                    try:
-                        decoded_stderr = stderr.decode('utf-8', errors='replace')
-                        for line in decoded_stderr.splitlines():
-                            if line.strip():
-                                self.error_received.emit(line.strip())
-                    except Exception:
-                        try:
-                            decoded_stderr = stderr.decode('latin-1', errors='replace')
-                            for line in decoded_stderr.splitlines():
-                                if line.strip():
-                                    self.error_received.emit(line.strip())
-                        except Exception:
-                            pass
+                    # stderr ist bereits ein String (durch text=True)
+                    for line in stderr.splitlines():
+                        if line.strip():
+                            self.error_received.emit(line.strip())
             except Exception:
                 pass
         

@@ -2,7 +2,7 @@
 Code Editor - Python Editor mit QScintilla Syntax-Highlighting
 """
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QHBoxLayout, QPushButton,
-                               QDialog, QScrollArea, QToolButton)
+                               QDialog, QScrollArea, QToolButton, QTextEdit)
 from PySide6.QtCore import Qt, QTimer, Signal, Slot, QPoint
 from PySide6.QtGui import QIcon, QPainter, QColor, QPolygon, QFont
 from pathlib import Path
@@ -30,6 +30,7 @@ class CodeEditor(QWidget):
         self.project_path: Path | None = None
         self.current_object_id: str | None = None  # ID des aktuell ausgewählten Objekts
         self.undo_redo_manager = None  # Wird vom main_window gesetzt
+        self.scene_canvas = None  # Wird vom main_window gesetzt (für Objekt-Updates)
         self.last_text = ""  # Letzter Text für Undo/Redo
         self.text_change_timer = QTimer()
         self.text_change_timer.setSingleShot(True)
@@ -394,10 +395,18 @@ class CodeEditor(QWidget):
                 with open(code_file, 'r', encoding='utf-8') as f:
                     code = f.read()
                 
+                # Signal temporär blockieren, damit beim Laden kein textChanged ausgelöst wird
+                if hasattr(self.editor, 'blockSignals'):
+                    self.editor.blockSignals(True)
+                
                 if hasattr(self.editor, 'setText'):
                     self.editor.setText(code)
                 else:
                     self.editor.setPlainText(code)
+                
+                # Signal wieder aktivieren
+                if hasattr(self.editor, 'blockSignals'):
+                    self.editor.blockSignals(False)
                 
                 # Letzten Text für Undo/Redo speichern
                 self.last_text = code
@@ -433,9 +442,39 @@ def update():
         WICHTIG: Code ist immer an die ID gebunden, nicht an den Namen!
         Der Name ist nur für die Anzeige (QOL-Feature).
         """
-        # Code aus Objekt-Daten laden (falls vorhanden)
-        # WICHTIG: Immer mit ID suchen, nie mit Name!
-        code = object_data.get("code", "")
+        # WICHTIG: Code immer direkt aus JSON-Datei laden, nicht aus object_data!
+        # Das stellt sicher, dass der neueste Code geladen wird, auch wenn self.objects
+        # noch nicht aktualisiert wurde.
+        code = ""
+        
+        if self.project_path:
+            try:
+                import json
+                project_file = self.project_path / "project.json"
+                if project_file.exists():
+                    with open(project_file, 'r', encoding='utf-8') as f:
+                        config = json.load(f)
+                    
+                    start_scene = config.get("start_scene", "level1")
+                    scene_file = self.project_path / "scenes" / f"{start_scene}.json"
+                    
+                    if scene_file.exists():
+                        with open(scene_file, 'r', encoding='utf-8') as f:
+                            scene_data = json.load(f)
+                        
+                        # Objekt in Szene finden und Code laden
+                        objects = scene_data.get("objects", [])
+                        for obj in objects:
+                            if obj.get("id") == object_id:
+                                code = obj.get("code", "")
+                                break
+            except Exception:
+                # Bei Fehler Fallback auf object_data
+                pass
+        
+        # Fallback: Code aus Objekt-Daten laden (falls nicht in JSON gefunden)
+        if not code:
+            code = object_data.get("code", "")
         
         if not code:
             # Standard-Code für Objekt - IMMER mit ID!
@@ -449,10 +488,18 @@ def update():
     pass
 """
         
+        # Signal temporär blockieren, damit beim Laden kein textChanged ausgelöst wird
+        if hasattr(self.editor, 'blockSignals'):
+            self.editor.blockSignals(True)
+        
         if hasattr(self.editor, 'setText'):
             self.editor.setText(code)
         else:
             self.editor.setPlainText(code)
+        
+        # Signal wieder aktivieren
+        if hasattr(self.editor, 'blockSignals'):
+            self.editor.blockSignals(False)
         
         # Letzten Text für Undo/Redo speichern
         self.last_text = code
@@ -466,7 +513,7 @@ def update():
     
     def _save_object_code(self, object_id: str):
         """Speichert Code für ein spezifisches Objekt in die Szene"""
-        if not self.project_path:
+        if not self.project_path or not object_id:
             return
         
         # Code aus Editor holen
@@ -488,28 +535,39 @@ def update():
             start_scene = config.get("start_scene", "level1")
             scene_file = self.project_path / "scenes" / f"{start_scene}.json"
             
-            if scene_file.exists():
-                with open(scene_file, 'r', encoding='utf-8') as f:
-                    scene_data = json.load(f)
-                
-                # Objekt finden und Code aktualisieren - IMMER mit ID suchen!
-                objects = scene_data.get("objects", [])
-                found = False
-                for obj in objects:
-                    # WICHTIG: Immer ID verwenden, nie Name!
+            if not scene_file.exists():
+                return
+            
+            with open(scene_file, 'r', encoding='utf-8') as f:
+                scene_data = json.load(f)
+            
+            # Objekt finden und Code aktualisieren - IMMER mit ID suchen!
+            objects = scene_data.get("objects", [])
+            found = False
+            for obj in objects:
+                # WICHTIG: Immer ID verwenden, nie Name!
+                if obj.get("id") == object_id:
+                    obj["code"] = code
+                    found = True
+                    break
+            
+            if not found:
+                return
+            
+            # Szene speichern
+            with open(scene_file, 'w', encoding='utf-8') as f:
+                json.dump(scene_data, f, indent=2, ensure_ascii=False)
+            
+            # WICHTIG: Auch self.objects in scene_canvas aktualisieren, damit die Daten synchron bleiben
+            if self.scene_canvas:
+                for obj in self.scene_canvas.objects:
                     if obj.get("id") == object_id:
                         obj["code"] = code
-                        found = True
                         break
-                
-                if not found:
-                    print(f"Warnung: Objekt mit ID '{object_id}' nicht in Szene gefunden!")
-                
-                # Szene speichern
-                with open(scene_file, 'w', encoding='utf-8') as f:
-                    json.dump(scene_data, f, indent=2, ensure_ascii=False)
+            
         except Exception as e:
-            print(f"Fehler beim Speichern des Objekt-Codes: {e}")
+            # Fehler stillschweigend ignorieren (kann bei gleichzeitigen Zugriffen passieren)
+            pass
     
     def set_undo_redo_manager(self, manager):
         """Setzt den Undo/Redo-Manager"""
@@ -532,6 +590,15 @@ def update():
     
     def _on_text_changed_with_undo(self):
         """Wird aufgerufen wenn Text geändert wird - mit Undo/Redo-Tracking"""
+        # Code SOFORT speichern bei jeder Änderung
+        if self.project_path:
+            if self.current_object_id:
+                # Code für aktuelles Objekt sofort speichern
+                self._save_object_code(self.current_object_id)
+            else:
+                # Globale game.py sofort speichern
+                self.save_code()
+        
         # Debouncing: Warte 500ms bevor Text-Änderung als Undo-Punkt gespeichert wird
         self.text_change_timer.stop()
         self.text_change_timer.start(500)
@@ -679,25 +746,33 @@ def update():
         content_widget = QWidget()
         content_layout = QVBoxLayout()
         content_layout.setContentsMargins(10, 10, 10, 10)
-        content_layout.setSpacing(15)
+        content_layout.setSpacing(0)  # Kein Spacing, damit TextEdit den gesamten Platz nutzt
         
         # Hilfe-Text mit allen Befehlen
         help_text = self._generate_help_text()
         
-        help_label = QLabel(help_text)
-        help_label.setWordWrap(True)
-        help_label.setStyleSheet("""
-            QLabel {
+        # QTextEdit statt QLabel für Textauswahl
+        help_text_edit = QTextEdit()
+        help_text_edit.setReadOnly(True)  # Read-only, aber Text auswählbar
+        help_text_edit.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse | 
+            Qt.TextInteractionFlag.TextSelectableByKeyboard
+        )
+        help_text_edit.setHtml(help_text)
+        help_text_edit.setStyleSheet("""
+            QTextEdit {
+                background-color: #1e1e1e;
                 color: #d4d4d4;
                 font-family: 'Consolas', 'Courier New', monospace;
                 font-size: 11pt;
-                line-height: 1.6;
+                border: none;
+                selection-background-color: #4a9eff;
+                selection-color: white;
             }
         """)
-        help_label.setTextFormat(Qt.TextFormat.RichText)
         
-        content_layout.addWidget(help_label)
-        content_layout.addStretch()
+        # TextEdit soll den gesamten verfügbaren Platz nutzen
+        content_layout.addWidget(help_text_edit, stretch=1)  # stretch=1 für gesamten Platz
         
         content_widget.setLayout(content_layout)
         scroll_area.setWidget(content_widget)
@@ -750,6 +825,7 @@ mx, my = mouse_position()</pre>
             <li><b>width, height</b> - Größe (float)</li>
             <li><b>visible</b> - Sichtbarkeit (bool)</li>
             <li><b>sprite</b> - Sprite-Pfad (string)</li>
+            <li><b>is_ground</b> - Boden-Tile (bool) - True wenn Objekt als Boden markiert ist</li>
         </ul>
         
         <h2 style="color: #4a9eff;">GameObject-Methoden</h2>
@@ -774,6 +850,7 @@ print_debug("Spieler-Position: " + str(player.x))</pre>
         
         <h2 style="color: #4a9eff;">Beispiel-Code</h2>
         
+        <h3 style="color: #90caf9;">Einfache Bewegung</h3>
         <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
 player = get_object("player")
 
@@ -789,6 +866,71 @@ def update():
     if player.collides_with("enemy1"):
         print_debug("Kollision!")
         player.destroy()</pre>
+        
+        <h3 style="color: #90caf9;">Bewegung mit Schwerkraft und Boden-Kollision</h3>
+        <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
+bear = get_object("object_15")
+
+# Geschwindigkeit
+speed = 3
+gravity = 0.5
+velocity_y = 0
+on_ground = False
+
+def update():
+    global velocity_y, on_ground
+    
+    # Horizontal-Bewegung
+    if key_pressed("LEFT"):
+        bear.x -= speed
+    if key_pressed("RIGHT"):
+        bear.x += speed
+    
+    # Schwerkraft
+    velocity_y += gravity
+    
+    # Prüfe Kollision mit Boden-Tiles
+    on_ground = False
+    all_objects = get_all_objects()
+    
+    # Prüfe Kollision mit allen Boden-Objekten
+    for obj in all_objects:
+        if obj.is_ground and bear.collides_with(obj.id):
+            # Kollision mit Boden - auf Boden setzen
+            on_ground = True
+            velocity_y = 0
+            # Position so anpassen, dass Bär auf Boden steht
+            bear.y = obj.y - bear.height
+            break
+    
+    # Wenn nicht auf Boden, falle
+    if not on_ground:
+        bear.y += velocity_y
+    
+    # Sprung mit Leertaste
+    if key_down("SPACE") and on_ground:
+        velocity_y = -10</pre>
+        
+        <h3 style="color: #90caf9;">Bewegliche Plattform</h3>
+        <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
+platform = get_object("object_13")
+
+platform_speed = 2
+platform_direction = 1
+platform_start_x = 672
+platform_end_x = 800
+
+def update():
+    global platform_direction
+    
+    # Bewegung hin und her
+    platform.x += platform_speed * platform_direction
+    
+    # Umkehren wenn am Ende
+    if platform.x >= platform_end_x:
+        platform_direction = -1
+    elif platform.x <= platform_start_x:
+        platform_direction = 1</pre>
         """
         return help_html
     

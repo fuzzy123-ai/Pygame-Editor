@@ -55,7 +55,11 @@ class GameObject:
             sprite_full_path = project_dir / self._sprite_path
             if sprite_full_path.exists():
                 try:
-                    self._sprite_surface = pygame.image.load(str(sprite_full_path)).convert_alpha()
+                    # libpng Warnungen unterdrücken (iCCP: known incorrect sRGB profile)
+                    import warnings
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings("ignore", category=UserWarning, message=".*iCCP.*")
+                        self._sprite_surface = pygame.image.load(str(sprite_full_path)).convert_alpha()
                     # Immer auf die Projekteinstellungs-Größe skalieren
                     target_size = int(sprite_size)
                     if self._sprite_surface.get_width() != target_size or \
