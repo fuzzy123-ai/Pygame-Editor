@@ -76,12 +76,21 @@ Ein kleiner Aktualisieren-Pfeil im Asset Browser fehlt. Wenn eine Datei über Wi
 - Objekte sollten ruhig auf dem Boden stehen, ohne zu wackeln
 - Kollisionsbehandlung sollte nur korrigieren, wenn wirklich eine Kollision vorliegt
 - Position sollte nur angepasst werden, wenn das Objekt wirklich in den Boden eindringt
+- **Kollisionen müssen zwischen ALLEN Objekten funktionieren, die:**
+  - Eine aktivierte Kollisionsbox haben, ODER
+  - Als Boden markiert sind (`is_ground = True`)
+- Boden-Objekte sollten in allen Richtungen (X und Y) blockieren
+- Objekte mit Kollisionsboxen sollten auch untereinander kollidieren können
 
 **Aktuelles Verhalten:**
 - Objekte wackeln hoch und runter, wenn sie auf dem Boden stehen
 - Die Position wird in jedem Frame korrigiert, auch wenn keine Bewegung stattfindet
+- Kollisionen funktionieren nur zwischen Objekten mit Kollisionsboxen und Boden-Objekten
+- Kollisionen zwischen normalen Objekten (ohne Boden-Markierung) funktionieren möglicherweise nicht korrekt
 
 **Lösungsansatz:**
 - Prüfung verbessern, ob das Objekt wirklich in den Boden eindringt
 - Position nur korrigieren, wenn sich das Objekt tatsächlich bewegt hat
 - Bessere Unterscheidung zwischen "auf Boden stehen" und "in Boden eindringen"
+- Kollisionsprüfung erweitern, um auch Objekte ohne Boden-Markierung zu berücksichtigen
+- Sicherstellen, dass `collides_with()` für alle Objekte mit aktivierter Kollisionsbox funktioniert
