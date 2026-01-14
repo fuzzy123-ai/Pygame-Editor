@@ -88,3 +88,49 @@ Die Position-Korrektur wurde verbessert:
   - Bei `dy == 0` wird nur der `on_ground` Status geprüft, ohne Position zu ändern
   - Kollisionsprüfung erweitert auf alle Objekte mit `_collider_enabled`, nicht nur `is_ground`
   - Horizontale Kollisionen funktionieren jetzt auch mit allen Objekten mit aktivierter Kollisionsbox
+
+  #bug5
+  implementiere abprallen, wenn eine ein anderes berühr that, soll sie die richtung wechseln
+
+  #bug6
+  wenn ein objekt dupliziert wird, dann wird der name auch dupliziert, obwohl eine andere obcect_id vergeben wurde.
+  bsp obect_2 wird dupliziert zu object_2_1 obwohl es eigenntlich die id object_4 hat
+
+## Bug #7: Syntax-Highlighting: Strings und Kommentare flackern
+
+**Status:** Offen  
+**Priorität:** Mittel  
+**Datum:** 2024
+
+### Beschreibung
+Strings (Text in Anführungszeichen) und Kommentare flackern im Code-Editor. Sie wechseln regelmäßig (~500ms) zwischen ihrer gesetzten Farbe und weiß (Standard-Textfarbe).
+
+### Symptome
+- Strings und Kommentare flackern sichtbar zwischen gesetzter Farbe und weiß
+- Das Flackern tritt regelmäßig auf (ca. alle 500ms)
+- Andere Syntax-Elemente (Keywords, Operatoren, etc.) funktionieren korrekt
+
+### Technische Details
+- Datei: `game_editor/ui/syntax_highlighter.py`
+- Methode: `apply_syntax_highlighting()`
+- Datei: `game_editor/ui/code_editor.py`
+- Methoden: `_on_text_changed_for_syntax()`, `_apply_syntax_highlighting()`
+
+### Versuchte Lösungen (bisher erfolglos)
+1. Debouncing mit QTimer (30ms Verzögerung) - verringert, aber beseitigt das Problem nicht
+2. Cache-Mechanismus (`_last_formatted_text`) - verhindert Re-Highlighting bei unverändertem Text, aber Flackern bleibt
+3. Dokument-Formatierungs-Check - prüft ob Dokument bereits formatiert ist, aber Flackern bleibt
+4. Signal-Blockierung (`blockSignals`) - verhindert rekursive Aufrufe, aber Flackern bleibt
+5. `_updating_syntax` Flag - verhindert parallele Highlighting-Aufrufe, aber Flackern bleibt
+
+### Mögliche Ursachen
+- Konflikt zwischen Syntax-Highlighting und LSP-Diagnostics
+- QTextDocument wird möglicherweise mehrmals formatiert
+- Race Condition zwischen Text-Änderungen und Highlighting
+- `apply_diagnostics()` könnte Syntax-Highlighting überschreiben
+
+### Nächste Schritte
+- Debug-Logging implementieren, um den genauen Ablauf zu verstehen
+- Prüfen, ob LSP-Updates das Highlighting überschreiben
+- Prüfen, ob `apply_diagnostics()` die Formatierung zurücksetzt
+  
