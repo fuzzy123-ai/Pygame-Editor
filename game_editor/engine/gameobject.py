@@ -97,6 +97,9 @@ class GameObject:
         # Ground (Boden-Tile) - MUSS vor Collider gesetzt werden
         self.is_ground: bool = data.get("ground", False)
         
+        # Camera (Kamera-Objekt) - nur ein Objekt kann die Kamera sein
+        self.is_camera: bool = data.get("camera", False)
+        
         # WICHTIG: Boden-Objekte bekommen automatisch eine Kollisionsbox
         # Das stellt sicher, dass Boden-Kollisionen funktionieren
         if self.is_ground and ("collider" not in data or not data["collider"].get("enabled", False)):
@@ -193,27 +196,40 @@ class GameObject:
         self.visible = False
         # Objekt wird in der nächsten Update-Phase aus der Liste entfernt
     
-    def draw(self, screen: pygame.Surface, debug: bool = False):
-        """Zeichnet das Objekt auf den Screen"""
+    def draw(self, screen: pygame.Surface, debug: bool = False, offset_x: float = 0, offset_y: float = 0):
+        """Zeichnet das Objekt auf den Screen
+        
+        Args:
+            screen: Pygame Surface zum Zeichnen
+            debug: Debug-Modus aktivieren
+            offset_x: X-Offset für Kamera (Standard: 0)
+            offset_y: Y-Offset für Kamera (Standard: 0)
+        """
         if not self.visible:
             return
         
+        # Position mit Offset berechnen
+        draw_x = int(self.x + offset_x)
+        draw_y = int(self.y + offset_y)
+        
         # Sprite zeichnen
         if self._sprite_surface:
-            screen.blit(self._sprite_surface, (int(self.x), int(self.y)))
+            screen.blit(self._sprite_surface, (draw_x, draw_y))
         else:
             # Fallback: Rechteck wenn kein Sprite
             color = (200, 200, 200) if self.type == "sprite" else (100, 100, 100)
             pygame.draw.rect(screen, color, 
-                           (int(self.x), int(self.y), int(self.width), int(self.height)))
+                           (draw_x, draw_y, int(self.width), int(self.height)))
         
         # Debug: Collider-Box (rote Box für Kollisionsbox)
         if debug and self._collider_enabled:
+            collider_draw_x = int(self._collider_x + offset_x)
+            collider_draw_y = int(self._collider_y + offset_y)
             pygame.draw.rect(screen, (255, 0, 0), 
-                           (int(self._collider_x), int(self._collider_y), 
+                           (collider_draw_x, collider_draw_y, 
                             int(self._collider_width), int(self._collider_height)), 
                            2)
             # Objekt-ID anzeigen
             font = pygame.font.Font(None, 24)
             text = font.render(self.id, True, (255, 255, 255))
-            screen.blit(text, (int(self.x), int(self.y) - 20))
+            screen.blit(text, (draw_x, draw_y - 20))

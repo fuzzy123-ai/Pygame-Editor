@@ -12,6 +12,7 @@ _key_states: Dict[str, bool] = {}  # Für key_down (einmalig beim Drücken)
 _key_pressed_last_frame: Dict[str, bool] = {}
 _debug_output: List[str] = []
 _spawn_templates: List[Dict[str, Any]] = []  # Für spawn_object
+_locked_y_positions: Dict[str, float] = {}  # Für lock_y_position - speichert fixierte Y-Positionen
 
 # Key-Mapping: String -> Pygame Key Code (einmalig erstellt, für bessere Performance)
 _KEY_MAP = {
@@ -363,3 +364,146 @@ def move_with_collision(obj: GameObject, dx: float, dy: float) -> Tuple[bool, bo
                 break
     
     return (on_ground, collision_x, collision_y)
+
+
+def push_objects(obj: GameObject, dx: float, dy: float, push_strength: float = 1.0) -> int:
+    """
+    Drückt andere Objekte weg, wenn dieses Objekt mit ihnen kollidiert
+    
+    Args:
+        obj: Das Objekt, das andere wegdrücken soll
+        dx: Bewegungsrichtung in X (wird verwendet um Push-Richtung zu bestimmen)
+        dy: Bewegungsrichtung in Y (wird verwendet um Push-Richtung zu bestimmen)
+        push_strength: Stärke des Pushs (Standard: 1.0 = vollständige Bewegung)
+        
+    Returns:
+        Anzahl der Objekte, die weggedrückt wurden
+        
+    WICHTIG: Diese Funktion sollte NACH move_with_collision() aufgerufen werden,
+    wenn das Objekt sich bewegt hat und andere Objekte wegdrücken soll.
+    """
+    if not obj or not obj._collider_enabled:
+        return 0
+    
+    pushed_count = 0
+    
+    # Prüfe alle anderen Objekte
+    for other in _game_objects:
+        if other.id == obj.id or not other._collider_enabled:
+            continue
+        
+        # Ignoriere Boden-Objekte (werden nicht weggedrückt)
+        if other.is_ground:
+            continue
+        
+        # Prüfe ob Objekte kollidieren (basierend auf aktueller Position)
+        collides_now = obj.collides_with(other.id)
+        
+        # Wenn keine Kollision jetzt, prüfe ob Objekte sich überlappen würden
+        # basierend auf der Bewegungsrichtung (für horizontale Bewegung)
+        collides = collides_now
+        if not collides_now and abs(dx) > 0.1:
+            # Prüfe ob Objekte sich überlappen würden, wenn wir die Position
+            # um -dx zurücksetzen würden (Position vor der Bewegung)
+            from .collision import CollisionSystem
+            # Temporär Position zurücksetzen für Kollisionsprüfung
+            old_x = obj.x
+            old_y = obj.y
+            obj.x = old_x - dx
+            obj.y = old_y - dy
+            collides = CollisionSystem.check_collision(obj, other)
+            obj.x = old_x  # Position wiederherstellen
+            obj.y = old_y
+        
+        # Zusätzlich: Prüfe ob Objekte sich in der Bewegungsrichtung befinden
+        # und sich überlappen würden (für den Fall, dass die Plattform sich bereits bewegt hat)
+        if not collides and abs(dx) > 0.1:
+            from .collision import CollisionSystem
+            # Prüfe ob Objekte sich in der Bewegungsrichtung befinden
+            # und sich überlappen würden, wenn die Plattform sich weiter bewegt
+            old_x = obj.x
+            old_y = obj.y
+            # Prüfe Position in Bewegungsrichtung
+            obj.x = old_x + dx
+            obj.y = old_y + dy
+            if CollisionSystem.check_collision(obj, other):
+                collides = True
+            obj.x = old_x  # Position wiederherstellen
+            obj.y = old_y
+        
+        if collides:
+            # Berechne Push-Richtung basierend auf Bewegungsrichtung
+            push_dx = 0
+            push_dy = 0
+            
+            if abs(dx) > abs(dy):
+                # Hauptsächlich horizontale Bewegung
+                if dx > 0:
+                    push_dx = push_strength * abs(dx)  # Nach rechts drücken
+                elif dx < 0:
+                    push_dx = -push_strength * abs(dx)  # Nach links drücken
+            else:
+                # Hauptsächlich vertikale Bewegung
+                if dy > 0:
+                    push_dy = push_strength * abs(dy)  # Nach unten drücken
+                elif dy < 0:
+                    push_dy = -push_strength * abs(dy)  # Nach oben drücken
+            
+            # Prüfe ob Objekt wirklich in die Push-Richtung bewegt werden kann
+            # (nur wenn es nicht auf dem drückenden Objekt steht)
+            obj_collider_bottom = obj._collider_y + obj._collider_height
+            other_collider_top = other._collider_y
+            other_collider_bottom = other._collider_y + other._collider_height
+            
+            # Wenn anderes Objekt auf diesem Objekt steht, nicht nach oben drücken
+            if push_dy < 0 and other_collider_bottom <= obj_collider_bottom + 3.0:
+                push_dy = 0
+            
+            # Objekt wegdrücken (mit Kollisionsprüfung)
+            if push_dx != 0 or push_dy != 0:
+                # Verwende move_with_collision für das andere Objekt, um Kollisionen zu berücksichtigen
+                # Das stellt sicher, dass weggedrückte Objekte auch an Hindernissen hängen bleiben
+                other_old_x = other.x
+                other_old_y = other.y
+                on_ground, collision_x, collision_y = move_with_collision(other, push_dx, push_dy)
+                
+                # Prüfe ob Objekt wirklich bewegt wurde (nicht durch Kollision blockiert)
+                if abs(other.x - other_old_x) > 0.01 or abs(other.y - other_old_y) > 0.01:
+                    pushed_count += 1
+    
+    return pushed_count
+
+
+def lock_y_position(obj: GameObject, y: float):
+    """
+    Fixiert die Y-Position eines Objekts.
+    Die Y-Position wird nach jedem Update automatisch auf diesen Wert zurückgesetzt.
+    
+    Args:
+        obj: Das Objekt, dessen Y-Position fixiert werden soll
+        y: Die Y-Position, die beibehalten werden soll
+    """
+    if obj:
+        _locked_y_positions[obj.id] = y
+
+
+def unlock_y_position(obj: GameObject):
+    """
+    Entfernt die Y-Position-Fixierung eines Objekts.
+    
+    Args:
+        obj: Das Objekt, dessen Y-Position-Fixierung entfernt werden soll
+    """
+    if obj and obj.id in _locked_y_positions:
+        del _locked_y_positions[obj.id]
+
+
+def apply_locked_y_positions():
+    """
+    Wird von runtime.py nach jedem Update aufgerufen, um fixierte Y-Positionen anzuwenden.
+    """
+    global _locked_y_positions
+    for obj_id, locked_y in _locked_y_positions.items():
+        obj = get_object(obj_id)
+        if obj:
+            obj.y = locked_y

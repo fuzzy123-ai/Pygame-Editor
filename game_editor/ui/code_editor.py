@@ -197,7 +197,7 @@ class CodeEditor(QWidget):
             lexer.setPaper(QColor(30, 30, 30), 0)  # #1e1e1e - Dunkler Hintergrund
             
             # Kommentare
-            lexer.setColor(QColor(106, 153, 85), 1)  # #6a9955 - Grün für Kommentare
+            lexer.setColor(QColor(100, 100, 100), 1)  # #646464 - Dunkelgrau für Kommentare
             lexer.setPaper(QColor(30, 30, 30), 1)
             
             # Zahlen
@@ -235,7 +235,7 @@ class CodeEditor(QWidget):
             lexer.setPaper(QColor(30, 30, 30), 10)
             
             # Comment blocks
-            lexer.setColor(QColor(106, 153, 85), 11)  # Grün wie Kommentare
+            lexer.setColor(QColor(100, 100, 100), 11)  # Dunkelgrau wie Kommentare
             lexer.setPaper(QColor(30, 30, 30), 11)
             
             # Unclosed strings

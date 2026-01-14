@@ -24,7 +24,8 @@
       },
       "layer": "default",
       "ground": true,
-      "code": "# Code für object_3\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_3\")\n\ndef update():\n    # Deine Logik hier\n    pass\n"
+      "code": "# Code für object_3\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_3\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
+      "camera": false
     },
     {
       "id": "object_10",
@@ -40,7 +41,8 @@
         "type": "rect"
       },
       "code": "# Code für object_10\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_10\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
-      "ground": true
+      "ground": true,
+      "camera": false
     },
     {
       "id": "object_14",
@@ -55,22 +57,8 @@
         "enabled": true,
         "type": "rect"
       },
-      "ground": false
-    },
-    {
-      "id": "object_9",
-      "type": "sprite",
-      "sprite": "assets/images/009.png",
-      "x": 1152,
-      "y": 96,
-      "width": 96,
-      "height": 96,
-      "layer": "default",
-      "collider": {
-        "enabled": true,
-        "type": "rect"
-      },
-      "ground": false
+      "ground": false,
+      "camera": false
     },
     {
       "id": "object_12",
@@ -86,7 +74,8 @@
         "type": "rect"
       },
       "ground": true,
-      "code": "# Code für object_12\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_12\")\n\ndef update():\n    # Deine Logik hier\n    pass\n"
+      "code": "# Code für object_12\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_12\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
+      "camera": false
     },
     {
       "id": "object_18",
@@ -102,7 +91,8 @@
         "type": "rect"
       },
       "ground": false,
-      "code": "# Code für object_18\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_18\")\n\ndef update():\n    # Deine Logik hier\n    pass\n"
+      "code": "# Code für object_18\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_18\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
+      "camera": false
     },
     {
       "id": "object_22",
@@ -119,7 +109,8 @@
       },
       "ground": true,
       "code": "# Code für object_12\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_12\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
-      "name": "object_1"
+      "name": "object_1",
+      "camera": false
     },
     {
       "id": "object_8",
@@ -140,7 +131,8 @@
       },
       "ground": true,
       "name": "wall",
-      "code": "# Code für object_8\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_8\")\n\ndef update():\n    # Deine Logik hier\n    pass\n"
+      "code": "# Code für object_8\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_8\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
+      "camera": false
     },
     {
       "id": "object_11",
@@ -161,14 +153,15 @@
       },
       "ground": true,
       "name": "wall_1",
-      "code": "# Code für object_11\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_11\")\n\ndef update():\n    # Deine Logik hier\n    pass\n"
+      "code": "# Code für object_11\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_11\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
+      "camera": false
     },
     {
       "id": "object_13",
       "type": "sprite",
       "sprite": "assets/images/009.png",
       "x": 768,
-      "y": 288,
+      "y": 192,
       "width": 96,
       "height": 96,
       "layer": "default",
@@ -181,7 +174,8 @@
         "height": 34
       },
       "ground": false,
-      "code": "platform = get_object(\"object_13\")\n\nplatform_speed = 2\nplatform_direction = 1\nplatform_start_x = 672\nplatform_end_x = 800\n\ndef update():\n    global platform_direction\n    \n    # Bewegung hin und her\n    platform.x += platform_speed * platform_direction\n    \n    # Umkehren wenn am Ende\n    if platform.x >= platform_end_x:\n        platform_direction = -1\n    elif platform.x \n        "
+      "code": "platform = get_object(\"object_13\")\n\nplatform_speed = 2\nplatform_direction = -1\nplatform_start_x = 672\nplatform_end_x = 800\n\n# Y-Position fixieren (wird automatisch nach jedem Update zurückgesetzt)\nlock_y_position(platform, platform.y)\n\ndef update():\n    global platform_direction\n    \n    # Bewegung hin und her mit Kollisionsbehandlung\n    dx = platform_speed * platform_direction\n    dy = 0\n    \n    on_ground, collision_x, collision_y = move_with_collision(platform, dx, dy)\n    \n    # Andere Objekte wegdrücken\n    if dx != 0:\n        push_objects(platform, dx, dy)\n    \n    # Umkehren wenn am Ende oder bei Kollision\n    if platform.x >= platform_end_x or collision_x:\n        platform_direction = -1\n    elif platform.x <= platform_start_x or collision_x:\n        platform_direction = 1",
+      "camera": false
     },
     {
       "id": "object_15",
@@ -201,7 +195,8 @@
         "height": 66
       },
       "ground": false,
-      "code": "bear = get_object(\"object_15\")\n\n# Geschwindigkeit\nspeed = 3\ngravity = 0.5\nvelocity_y = 0\non_ground = False\n\ndef update():\n    global velocity_y, on_ground\n    \n    # Horizontal-Bewegung\n    dx = 0\n    if key_pressed(\"LEFT\"):\n        dx = -speed\n    if key_pressed(\"RIGHT\"):\n        dx = speed\n    \n    # Schwerkraft\n    if not on_ground:\n        velocity_y += gravity\n    \n    # Bewegung mit automatischer Kollisionsbehandlung\n    on_ground, collision_x, collision_y = move_with_collision(bear, dx, velocity_y)\n    \n    # Wenn auf Boden, Geschwindigkeit zurücksetzen\n    if on_ground:\n        velocity_y = 0\n    \n    # Sprung\n    if key_down(\"SPACE\") and on_ground:\n        velocity_y = -10\n        on_ground = False "
+      "code": "bear = get_object(\"object_15\")\n\n# Geschwindigkeit\nspeed = 3\ngravity = 0.5\nvelocity_y = 0\non_ground = False\n\ndef update():\n    global velocity_y, on_ground\n    \n    # Horizontal-Bewegung\n    dx = 0\n    if key_pressed(\"LEFT\"):\n        dx = -speed\n    if key_pressed(\"RIGHT\"):\n        dx = speed\n    \n    # Schwerkraft\n    if not on_ground:\n        velocity_y += gravity\n    \n    # Bewegung mit automatischer Kollisionsbehandlung\n    on_ground, collision_x, collision_y = move_with_collision(bear, dx, velocity_y)\n    \n    # Wenn auf Boden, Geschwindigkeit zurücksetzen\n    if on_ground:\n        velocity_y = 0\n    \n    # Sprung - key_pressed für kontinuierliches Springen\n    if key_pressed(\"SPACE\") and on_ground:\n        velocity_y = -10\n        on_ground = False ",
+      "camera": true
     },
     {
       "id": "object_23",
@@ -222,7 +217,8 @@
       },
       "ground": true,
       "name": "wall_2",
-      "code": "# Code für object_8\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_8\")\n\ndef update():\n    # Deine Logik hier\n    pass\n"
+      "code": "# Code für object_8\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_8\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
+      "camera": false
     },
     {
       "id": "object_24",
@@ -243,7 +239,8 @@
       },
       "ground": true,
       "name": "wall_1_1",
-      "code": "# Code für object_11\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_11\")\n\ndef update():\n    # Deine Logik hier\n    pass\n"
+      "code": "# Code für object_11\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_11\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
+      "camera": false
     },
     {
       "id": "object_25",
@@ -264,7 +261,8 @@
       },
       "ground": true,
       "name": "wall_3",
-      "code": "# Code für object_8\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_8\")\n\ndef update():\n    # Deine Logik hier\n    pass\n"
+      "code": "# Code für object_8\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_8\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
+      "camera": false
     },
     {
       "id": "object_26",
@@ -285,7 +283,8 @@
       },
       "ground": true,
       "name": "wall_4",
-      "code": "# Code für object_8\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_8\")\n\ndef update():\n    # Deine Logik hier\n    pass\n"
+      "code": "# Code für object_8\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_8\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
+      "camera": false
     },
     {
       "id": "object_1",
@@ -302,7 +301,8 @@
       },
       "ground": true,
       "name": "wall_4_1",
-      "code": "# Code für object_8\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_8\")\n\ndef update():\n    # Deine Logik hier\n    pass\n"
+      "code": "# Code für object_8\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_8\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
+      "camera": false
     }
   ]
 }

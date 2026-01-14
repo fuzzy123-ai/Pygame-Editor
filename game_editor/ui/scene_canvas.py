@@ -346,6 +346,12 @@ class SceneCanvas(QWidget):
             elif not isinstance(obj["ground"], bool):
                 obj["ground"] = bool(obj["ground"])
             
+            # Camera validieren
+            if "camera" not in obj:
+                obj["camera"] = False
+            elif not isinstance(obj["camera"], bool):
+                obj["camera"] = bool(obj["camera"])
+            
             # Type validieren (optional)
             if "type" not in obj:
                 obj["type"] = "sprite"
@@ -1400,6 +1406,36 @@ class SceneCanvas(QWidget):
         self.save_scene()
         self.canvas.update()
     
+    def _set_camera(self, obj_id: str):
+        """Setzt ein Objekt als Kamera (nur ein Objekt kann die Kamera sein)"""
+        # Zuerst alle anderen Objekte deaktivieren
+        for obj in self.objects:
+            if obj.get("id") != obj_id:
+                obj["camera"] = False
+        
+        # Dann das gewählte Objekt als Kamera setzen
+        for obj in self.objects:
+            if obj.get("id") == obj_id:
+                obj["camera"] = True
+                break
+        
+        self.save_scene()
+        self.canvas.update()
+    
+    def _remove_camera(self):
+        """Entfernt die Kamera-Eigenschaft von allen Objekten"""
+        for obj in self.objects:
+            obj["camera"] = False
+        self.save_scene()
+        self.canvas.update()
+    
+    def get_camera_object(self) -> Optional[Dict[str, Any]]:
+        """Gibt das Kamera-Objekt zurück (falls vorhanden)"""
+        for obj in self.objects:
+            if obj.get("camera", False):
+                return obj
+        return None
+    
     def _delete_object_by_id(self, obj_id: str):
         """Löscht ein Objekt anhand seiner ID"""
         self._delete_objects_multiple([obj_id])
@@ -2009,6 +2045,42 @@ class CanvasWidget(QWidget):
                 )
             else:
                 remove_ground_action.setEnabled(False)  # Ausgegraut wenn kein Boden vorhanden
+            
+            menu.addSeparator()
+            
+            # Kamera-Option
+            # Prüfen ob eines der ausgewählten Objekte bereits die Kamera ist
+            any_is_camera = False
+            for obj_id in self.parent_canvas.selected_object_ids:
+                obj = next((o for o in self.parent_canvas.objects if o.get("id") == obj_id), None)
+                if obj and obj.get("camera", False):
+                    any_is_camera = True
+                    break
+            
+            # Prüfen ob bereits ein anderes Objekt die Kamera ist
+            other_is_camera = False
+            for obj in self.parent_canvas.objects:
+                if obj.get("id") not in self.parent_canvas.selected_object_ids and obj.get("camera", False):
+                    other_is_camera = True
+                    break
+            
+            # Kamera setzen - immer sichtbar, enabled wenn nicht bereits Kamera
+            set_camera_action = menu.addAction("Als Kamera festlegen")
+            if not any_is_camera:
+                set_camera_action.triggered.connect(
+                    lambda: self.parent_canvas._set_camera(self.parent_canvas.selected_object_ids[0] if self.parent_canvas.selected_object_ids else clicked_obj_id)
+                )
+            else:
+                set_camera_action.setEnabled(False)  # Ausgegraut wenn bereits Kamera
+            
+            # Kamera entfernen - immer sichtbar, enabled wenn Kamera vorhanden
+            remove_camera_action = menu.addAction("Kamera entfernen")
+            if any_is_camera:
+                remove_camera_action.triggered.connect(
+                    lambda: self.parent_canvas._remove_camera()
+                )
+            else:
+                remove_camera_action.setEnabled(False)  # Ausgegraut wenn keine Kamera vorhanden
             
             # Menü anzeigen
             menu.exec(event.globalPos())

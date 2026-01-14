@@ -1,33 +1,28 @@
-bear = get_object("object_15")
+platform = get_object("object_13")
 
-# Geschwindigkeit
-speed = 3
-gravity = 0.5
-velocity_y = 0
-on_ground = False
+platform_speed = 2
+platform_direction = -1
+platform_start_x = 672
+platform_end_x = 800
+
+# Y-Position fixieren (wird automatisch nach jedem Update zurückgesetzt)
+lock_y_position(platform, platform.y)
 
 def update():
-    global velocity_y, on_ground
+    global platform_direction
     
-    # Horizontal-Bewegung
-    dx = 0
-    if key_pressed("LEFT"):
-        dx = -speed
-    if key_pressed("RIGHT"):
-        dx = speed
+    # Bewegung hin und her mit Kollisionsbehandlung
+    dx = platform_speed * platform_direction
+    dy = 0
     
-    # Schwerkraft
-    if not on_ground:
-        velocity_y += gravity
+    on_ground, collision_x, collision_y = move_with_collision(platform, dx, dy)
     
-    # Bewegung mit automatischer Kollisionsbehandlung
-    on_ground, collision_x, collision_y = move_with_collision(bear, dx, velocity_y)
+    # Andere Objekte wegdrücken
+    if dx != 0:
+        push_objects(platform, dx, dy)
     
-    # Wenn auf Boden, Geschwindigkeit zurücksetzen
-    if on_ground:
-        velocity_y = 0
-    print(velocity_y)
-    # Sprung - wenn Leertaste gedrückt gehalten wird, springt der Bär immer wieder
-    if key_pressed("SPACE") and on_ground:
-        velocity_y = -10
-        on_ground = False 
+    # Umkehren wenn am Ende oder bei Kollision
+    if platform.x >= platform_end_x or collision_x:
+        platform_direction = -1
+    elif platform.x <= platform_start_x or collision_x:
+        platform_direction = 1

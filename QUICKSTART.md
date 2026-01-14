@@ -72,6 +72,12 @@ def update():
     # Kollision prüfen
     if player.collides_with("enemy1"):
         print_debug("Kollision!")
+    
+    # Bewegung mit Kollisionsbehandlung
+    # on_ground, collision_x, collision_y = move_with_collision(player, dx, dy)
+    
+    # Andere Objekte wegdrücken
+    # pushed_count = push_objects(player, dx, dy)
 ```
 
 ## Tastatur-Shortcuts

@@ -122,6 +122,21 @@ if player.collides_with("enemy1"):  # Kollision prüfen
 player.destroy()         # Objekt entfernen
 ```
 
+### Bewegung & Kollision
+```python
+# Bewegung mit automatischer Kollisionsbehandlung
+on_ground, collision_x, collision_y = move_with_collision(obj, dx, dy)
+# on_ground: True wenn Objekt auf Boden/Plattform steht
+# collision_x: True wenn Kollision in X-Richtung
+# collision_y: True wenn Kollision in Y-Richtung
+
+# Andere Objekte wegdrücken
+pushed_count = push_objects(obj, dx, dy, push_strength=1.0)
+# drückt andere Objekte in Bewegungsrichtung weg
+# push_strength: Stärke des Pushs (Standard: 1.0)
+# gibt Anzahl der weggedrückten Objekte zurück
+```
+
 ### Utility
 ```python
 print_debug("Text")      # Debug-Ausgabe (erscheint in Console)
