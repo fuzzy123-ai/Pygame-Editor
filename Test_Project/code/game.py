@@ -26,8 +26,8 @@ def update():
     # Wenn auf Boden, Geschwindigkeit zurücksetzen
     if on_ground:
         velocity_y = 0
-    
-    # Sprung
-    if key_down("SPACE") and on_ground:
+    print(velocity_y)
+    # Sprung - wenn Leertaste gedrückt gehalten wird, springt der Bär immer wieder
+    if key_pressed("SPACE") and on_ground:
         velocity_y = -10
         on_ground = False 

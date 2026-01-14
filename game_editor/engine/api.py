@@ -13,6 +13,21 @@ _key_pressed_last_frame: Dict[str, bool] = {}
 _debug_output: List[str] = []
 _spawn_templates: List[Dict[str, Any]] = []  # Für spawn_object
 
+# Key-Mapping: String -> Pygame Key Code (einmalig erstellt, für bessere Performance)
+_KEY_MAP = {
+    "LEFT": pygame.K_LEFT,
+    "RIGHT": pygame.K_RIGHT,
+    "UP": pygame.K_UP,
+    "DOWN": pygame.K_DOWN,
+    "SPACE": pygame.K_SPACE,
+    "ENTER": pygame.K_RETURN,
+    "W": pygame.K_w,
+    "A": pygame.K_a,
+    "S": pygame.K_s,
+    "D": pygame.K_d,
+    "F1": pygame.K_F1,
+}
+
 
 def _init_api(objects: List[GameObject]):
     """Initialisiert die API (wird von runtime.py aufgerufen)"""
@@ -24,33 +39,22 @@ def _init_api(objects: List[GameObject]):
 def _update_key_states():
     """Aktualisiert Tastatur-Status (wird von runtime.py aufgerufen)"""
     global _key_states, _key_pressed_last_frame
+    # WICHTIG: Hole Tastatur-Status sofort und direkt (keine Verzögerung)
     keys = pygame.key.get_pressed()
     
-    # Key-Mapping: String -> Pygame Key Code
-    KEY_MAP = {
-        "LEFT": pygame.K_LEFT,
-        "RIGHT": pygame.K_RIGHT,
-        "UP": pygame.K_UP,
-        "DOWN": pygame.K_DOWN,
-        "SPACE": pygame.K_SPACE,
-        "ENTER": pygame.K_RETURN,
-        "W": pygame.K_w,
-        "A": pygame.K_a,
-        "S": pygame.K_s,
-        "D": pygame.K_d,
-        "F1": pygame.K_F1,
-    }
-    
-    # Aktueller Frame
+    # Aktueller Frame - alle Tasten gleichzeitig und unabhängig prüfen
     current_states = {}
-    for key_name, key_code in KEY_MAP.items():
-        current_states[key_name] = keys[key_code]
+    for key_name, key_code in _KEY_MAP.items():
+        # Direkter Zugriff auf Tastatur-Status (sofort, keine Verzögerung)
+        current_states[key_name] = bool(keys[key_code])
     
-    # key_down: True nur beim ersten Drücken
+    # key_down: True nur beim ersten Drücken (alle Tasten unabhängig voneinander)
+    # WICHTIG: Jede Taste wird unabhängig geprüft - keine Blockierung zwischen Tasten
     _key_states = {}
-    for key_name in KEY_MAP.keys():
+    for key_name in _KEY_MAP.keys():
         was_pressed = _key_pressed_last_frame.get(key_name, False)
         is_pressed = current_states.get(key_name, False)
+        # Taste wurde gerade gedrückt (war vorher nicht gedrückt, jetzt gedrückt)
         _key_states[key_name] = is_pressed and not was_pressed
     
     _key_pressed_last_frame = current_states
@@ -91,26 +95,18 @@ def key_pressed(key: str) -> bool:
         
     Returns:
         True wenn Taste gedrückt, sonst False
+        
+    WICHTIG: Diese Funktion prüft sofort den aktuellen Tastatur-Status.
+    Alle Tasten können gleichzeitig und unabhängig voneinander erkannt werden.
     """
     try:
+        # Hole sofort den aktuellen Tastatur-Status (keine Verzögerung)
         keys = pygame.key.get_pressed()
-        KEY_MAP = {
-            "LEFT": pygame.K_LEFT,
-            "RIGHT": pygame.K_RIGHT,
-            "UP": pygame.K_UP,
-            "DOWN": pygame.K_DOWN,
-            "SPACE": pygame.K_SPACE,
-            "ENTER": pygame.K_RETURN,
-            "W": pygame.K_w,
-            "A": pygame.K_a,
-            "S": pygame.K_s,
-            "D": pygame.K_d,
-            "F1": pygame.K_F1,
-        }
-        key_code = KEY_MAP.get(key.upper())
+        key_code = _KEY_MAP.get(key.upper())
         if key_code is None:
             return False
-        return keys[key_code]
+        # Direkte Rückgabe - keine zusätzliche Verarbeitung
+        return bool(keys[key_code])
     except:
         return False
 
@@ -124,8 +120,35 @@ def key_down(key: str) -> bool:
         
     Returns:
         True nur beim ersten Frame nach Drücken, sonst False
+        
+    WICHTIG: Diese Funktion prüft sowohl den gecachten Status als auch direkt
+    den Tastatur-Status, um sicherzustellen, dass keine Tastendrücke verpasst werden.
     """
-    return _key_states.get(key.upper(), False)
+    key_upper = key.upper()
+    
+    # Zuerst prüfe den gecachten Status (schnell)
+    if _key_states.get(key_upper, False):
+        return True
+    
+    # Falls nicht im Cache, prüfe direkt den Tastatur-Status
+    # Das stellt sicher, dass auch sehr schnelle Tastendrücke erkannt werden
+    try:
+        keys = pygame.key.get_pressed()
+        key_code = _KEY_MAP.get(key_upper)
+        if key_code is None:
+            return False
+        
+        # Prüfe ob Taste gerade gedrückt ist, aber im letzten Frame nicht
+        is_pressed = bool(keys[key_code])
+        was_pressed = _key_pressed_last_frame.get(key_upper, False)
+        
+        # Wenn Taste gerade gedrückt wurde (war vorher nicht gedrückt)
+        if is_pressed and not was_pressed:
+            return True
+    except:
+        pass
+    
+    return False
 
 
 def mouse_position() -> Tuple[int, int]:
@@ -214,37 +237,129 @@ def move_with_collision(obj: GameObject, dx: float, dy: float) -> Tuple[bool, bo
     collision_x = False
     if dx != 0:
         for other in _game_objects:
-            if other.id != obj.id and other.is_ground and other._collider_enabled:
+            if other.id != obj.id and other._collider_enabled:
+                # Kollisionen mit ALLEN Objekten mit aktivierter Kollisionsbox (Boden, Plattformen, etc.)
+                # TODO: Später könnte hier geprüft werden ob other.is_enemy für spezielle Behandlung
                 if obj.collides_with(other.id):
-                    # Kollision in X-Richtung - Position zurücksetzen
-                    obj.x = old_x
-                    collision_x = True
-                    break
+                    # WICHTIG: Prüfe ob Objekt auf dem anderen Objekt steht
+                    # Verwende Position NACH Bewegung für Kollisionsprüfung
+                    obj_collider_bottom = obj._collider_y + obj._collider_height
+                    obj_collider_top = obj._collider_y
+                    other_collider_bottom = other._collider_y + other._collider_height
+                    other_collider_top = other._collider_y
+                    
+                    # Prüfe ob Objekt auf dem anderen Objekt steht (von oben)
+                    # Wenn Unterseite des Objekts nahe an Oberseite des anderen Objekts = Objekt steht darauf
+                    # Toleranz von 3 Pixeln für Rundungsfehler und kleine Bewegungen
+                    is_standing_on = (obj_collider_bottom >= other_collider_top - 3.0 and 
+                                     obj_collider_bottom <= other_collider_top + 3.0)
+                    
+                    # WICHTIG: Wenn Objekt auf Plattform/Boden steht, KEINE horizontale Blockierung!
+                    if is_standing_on:
+                        # Objekt steht darauf - horizontale Bewegung erlauben
+                        continue
+                    
+                    # Nur blockieren wenn es KEINE "darauf stehen" Situation ist
+                    # Prüfe ob es eine echte seitliche Kollision ist (nicht nur vertikale Überlappung)
+                    obj_fully_above = obj_collider_bottom < other_collider_top
+                    obj_fully_below = obj_collider_top > other_collider_bottom
+                    
+                    if not (obj_fully_above or obj_fully_below):
+                        # Echte seitliche Kollision - Position zurücksetzen
+                        obj.x = old_x
+                        collision_x = True
+                        break
     
     # Prüfe vertikale Kollisionen (Y-Achse)
     on_ground = False
     collision_y = False
     
-    # Prüfe ob Objekt mit Boden kollidiert
+    # Prüfe Kollisionen mit allen Objekten (Boden und andere mit Kollisionsbox)
     for other in _game_objects:
-        if other.id != obj.id and other.is_ground and other._collider_enabled:
+        if other.id != obj.id and other._collider_enabled:
+            # Kollisionen mit allen Objekten mit aktivierter Kollisionsbox
             if obj.collides_with(other.id):
                 collision_y = True
-                if dy > 0:  # Objekt fällt nach unten
-                    # Objekt war über dem Boden - jetzt auf Boden setzen
-                    # Verwende die Y-Position der Kollisionsbox des Bodens (other._collider_y)
-                    # minus Objekt-Höhe, um die Unterseite des Objekts auf die Oberseite des Bodens zu setzen
-                    on_ground = True
-                    obj.y = other._collider_y - obj.height
-                elif dy < 0:  # Objekt springt nach oben
-                    # Position zurücksetzen wenn gegen Decke
-                    obj.y = old_y
-                elif dy == 0:  # Objekt bewegt sich nicht vertikal
-                    # Prüfe ob Objekt wirklich auf dem Boden steht
-                    # Wenn Unterseite des Objekts nahe an Oberseite des Bodens
-                    # Toleranz von 2 Pixeln
-                    if obj.y + obj.height <= other._collider_y + 2:
-                        on_ground = True
+                
+                if other.is_ground:
+                    # Berechne Positionen für Boden-Kollision
+                    # WICHTIG: Verwende Kollisionsbox-Positionen, nicht Objekt-Positionen!
+                    obj_collider_bottom = obj._collider_y + obj._collider_height  # Unterseite der Kollisionsbox des Objekts
+                    ground_top = other._collider_y  # Oberseite der Kollisionsbox des Bodens
+                    penetration = obj_collider_bottom - ground_top  # Wie weit die Kollisionsbox in den Boden eindringt
+                    
+                    if dy > 0:  # Objekt fällt nach unten
+                        # Prüfe ob Kollisionsbox wirklich in den Boden eindringt
+                        # Nur korrigieren wenn Kollisionsbox wirklich unter dem Boden ist (mehr als 0.1 Pixel)
+                        if penetration > 0.1:
+                            # Kollisionsbox war über dem Boden - jetzt darauf setzen
+                            # Setze Unterseite der Kollisionsbox auf Oberseite des Bodens
+                            # obj._collider_y + obj._collider_height = ground_top
+                            # obj.y + obj._collider_offset_y + obj._collider_height = ground_top
+                            # obj.y = ground_top - obj._collider_height - obj._collider_offset_y
+                            on_ground = True
+                            obj.y = ground_top - obj._collider_height - obj._collider_offset_y
+                        elif penetration >= -1.0:  # Toleranz: bereits korrekt oder maximal 1 Pixel darüber
+                            # Kollisionsbox steht bereits korrekt auf dem Boden - keine Position-Änderung!
+                            on_ground = True
+                            # Position NICHT ändern, um Wackeln zu vermeiden
+                    elif dy < 0:  # Objekt springt nach oben
+                        # Position zurücksetzen wenn gegen Decke
+                        obj.y = old_y
+                    elif dy == 0:  # Objekt bewegt sich nicht vertikal
+                        # WICHTIG: Keine Position-Korrektur bei dy == 0!
+                        # Nur prüfen, ob Kollisionsbox auf Boden steht (ohne Position zu ändern)
+                        # Toleranz von 1 Pixel für Rundungsfehler
+                        if ground_top - 1.0 <= obj_collider_bottom <= ground_top + 1.0:
+                            on_ground = True
+                else:
+                    # Kollision mit anderem Objekt (nicht Boden) - z.B. Plattformen
+                    # Berechne Kollisionsbox-Positionen für präzise Kollisionsbehandlung
+                    obj_collider_bottom = obj._collider_y + obj._collider_height
+                    obj_collider_top = obj._collider_y
+                    other_collider_bottom = other._collider_y + other._collider_height
+                    other_collider_top = other._collider_y
+                    
+                    # Prüfe von welcher Richtung die Kollision kommt
+                    # WICHTIG: Für Plattformen - nur von oben blockieren (durchfallen erlauben)
+                    # Später kann hier auch "enemy" Logik hinzugefügt werden
+                    
+                    if dy > 0:  # Objekt fällt nach unten
+                        # Prüfe ob Objekt wirklich von oben kommt (Unterseite über Oberseite der Plattform)
+                        # Nur wenn Objekt von oben kommt, auf Plattform landen
+                        penetration = obj_collider_bottom - other_collider_top
+                        if penetration > 0.1:  # Objekt dringt wirklich in Plattform ein
+                            # Objekt kollidiert von oben mit Plattform/Objekt
+                            # Setze Unterseite der Kollisionsbox auf Oberseite des anderen Objekts
+                            # TODO: Später hier prüfen ob other.is_enemy und dann töten statt landen
+                            obj.y = other_collider_top - obj._collider_height - obj._collider_offset_y
+                            # WICHTIG: Objekt steht jetzt auf der Plattform - on_ground setzen!
+                            on_ground = True
+                        elif penetration >= -2.0:  # Toleranz: bereits korrekt oder maximal 2 Pixel darüber
+                            # Objekt steht bereits korrekt auf Plattform - keine Position-Änderung!
+                            # WICHTIG: on_ground setzen, damit Schwerkraft nicht weiter angewendet wird!
+                            on_ground = True
+                            # Position NICHT ändern, um Wackeln zu vermeiden
+                    elif dy < 0:  # Objekt springt nach oben
+                        # Objekt kommt von unten - durch Plattform durchgehen (keine Blockierung)
+                        # Position NICHT zurücksetzen, damit Objekt durch Plattform springen kann
+                        # Nur wenn Objekt wirklich von unten kommt (Oberseite unter Unterseite der Plattform)
+                        if obj_collider_top < other_collider_bottom:
+                            # Objekt kollidiert von unten - durchgehen lassen (keine Position-Änderung)
+                            pass
+                        else:
+                            # Objekt ist bereits in der Plattform - Position zurücksetzen
+                            obj.y = old_y
+                    elif dy == 0:  # Objekt bewegt sich nicht vertikal
+                        # WICHTIG: Keine Position-Korrektur bei dy == 0!
+                        # Nur prüfen, ob Objekt auf Plattform steht (ohne Position zu ändern)
+                        # Toleranz von 2 Pixeln für Rundungsfehler
+                        if other_collider_top - 2.0 <= obj_collider_bottom <= other_collider_top + 2.0:
+                            # Objekt steht auf Plattform - on_ground setzen!
+                            on_ground = True
+                        else:
+                            # Objekt ist seitlich oder in Plattform - keine Position-Korrektur bei dy == 0
+                            pass
                 break
     
     return (on_ground, collision_x, collision_y)

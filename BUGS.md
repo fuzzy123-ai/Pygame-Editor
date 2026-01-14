@@ -63,34 +63,28 @@ Ein kleiner Aktualisieren-Pfeil im Asset Browser fehlt. Wenn eine Datei über Wi
 - Methoden: `_refresh_assets()`, `_on_folder_changed()`
 - Fix: File-Watcher überwacht jetzt `assets/images/` Ordner, automatische Aktualisierung bei Änderungen
 
-## Offene Bugs
+## Bug #4: Kollisionsbehandlung: Wackeln bei Boden-Kollision
 
-### Kollisionsbehandlung: Wackeln bei Boden-Kollision
-**Status:** Offen  
-**Beschreibung:** Die `move_with_collision()` Funktion führt zu einem Wackeln (hoch und runter springen), wenn ein Objekt auf dem Boden steht. Die Kollisionsbehandlung korrigiert die Position zu aggressiv, was zu einem Bounce-Effekt führt.
+**Status:** Behoben  
+**Priorität:** Hoch  
+**Datum:** 2024  
+**Behoben:** 2024
 
-**Betroffene Dateien:**
-- `game_editor/engine/api.py` - `move_with_collision()` Funktion
+### Beschreibung
+Die `move_with_collision()` Funktion führte zu einem Wackeln (hoch und runter springen), wenn ein Objekt auf dem Boden stand. Die Kollisionsbehandlung korrigierte die Position zu aggressiv, was zu einem Bounce-Effekt führte.
 
-**Erwartetes Verhalten:**
-- Objekte sollten ruhig auf dem Boden stehen, ohne zu wackeln
-- Kollisionsbehandlung sollte nur korrigieren, wenn wirklich eine Kollision vorliegt
-- Position sollte nur angepasst werden, wenn das Objekt wirklich in den Boden eindringt
-- **Kollisionen müssen zwischen ALLEN Objekten funktionieren, die:**
-  - Eine aktivierte Kollisionsbox haben, ODER
-  - Als Boden markiert sind (`is_ground = True`)
-- Boden-Objekte sollten in allen Richtungen (X und Y) blockieren
-- Objekte mit Kollisionsboxen sollten auch untereinander kollidieren können
+### Lösung
+Die Position-Korrektur wurde verbessert:
+- **Keine Position-Korrektur bei `dy == 0`**: Wenn sich das Objekt nicht vertikal bewegt, wird nur geprüft, ob es auf dem Boden steht, aber die Position wird nicht korrigiert. Dies verhindert das Wackeln.
+- **Bessere Unterscheidung**: Bei `dy == 0` wird nur geprüft, ob die Unterseite des Objekts nahe an der Oberseite des Bodens ist (Toleranz: 1 Pixel für Rundungsfehler), ohne die Position zu ändern.
+- **Erweiterte Kollisionsprüfung**: Kollisionen funktionieren jetzt zwischen ALLEN Objekten mit aktivierter Kollisionsbox, nicht nur mit Boden-Objekten. Dies ermöglicht Kollisionen zwischen normalen Objekten untereinander.
+- **Einfache API beibehalten**: Die Funktion bleibt einfach zu verwenden - keine Änderungen an der API-Signatur oder den Parametern.
 
-**Aktuelles Verhalten:**
-- Objekte wackeln hoch und runter, wenn sie auf dem Boden stehen
-- Die Position wird in jedem Frame korrigiert, auch wenn keine Bewegung stattfindet
-- Kollisionen funktionieren nur zwischen Objekten mit Kollisionsboxen und Boden-Objekten
-- Kollisionen zwischen normalen Objekten (ohne Boden-Markierung) funktionieren möglicherweise nicht korrekt
-
-**Lösungsansatz:**
-- Prüfung verbessern, ob das Objekt wirklich in den Boden eindringt
-- Position nur korrigieren, wenn sich das Objekt tatsächlich bewegt hat
-- Bessere Unterscheidung zwischen "auf Boden stehen" und "in Boden eindringen"
-- Kollisionsprüfung erweitern, um auch Objekte ohne Boden-Markierung zu berücksichtigen
-- Sicherstellen, dass `collides_with()` für alle Objekte mit aktivierter Kollisionsbox funktioniert
+### Technische Details
+- Datei: `game_editor/engine/api.py`
+- Methode: `move_with_collision()`
+- Fix: 
+  - Position wird nur korrigiert, wenn sich das Objekt tatsächlich bewegt (`dy != 0`)
+  - Bei `dy == 0` wird nur der `on_ground` Status geprüft, ohne Position zu ändern
+  - Kollisionsprüfung erweitert auf alle Objekte mit `_collider_enabled`, nicht nur `is_ground`
+  - Horizontale Kollisionen funktionieren jetzt auch mit allen Objekten mit aktivierter Kollisionsbox
