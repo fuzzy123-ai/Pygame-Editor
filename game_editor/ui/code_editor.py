@@ -1,20 +1,219 @@
 """
-Code Editor - Python Editor mit QScintilla Syntax-Highlighting
+Code Editor - Python Editor mit QTextEdit, LSP und Auto-Completion
 """
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QHBoxLayout, QPushButton,
-                               QDialog, QScrollArea, QToolButton, QTextEdit)
-from PySide6.QtCore import Qt, QTimer, Signal, Slot, QPoint
-from PySide6.QtGui import QIcon, QPainter, QColor, QPolygon, QFont
+                               QDialog, QScrollArea, QToolButton, QTextEdit, QMenu, QCompleter,
+                               QSplitter, QListWidgetItem)
+from PySide6.QtCore import Qt, QTimer, Signal, Slot, QPoint, QStringListModel
+from typing import Optional
+from PySide6.QtGui import (QIcon, QPainter, QColor, QPolygon, QFont, QContextMenuEvent, QAction,
+                          QTextCharFormat, QTextCursor, QTextDocument)
 from pathlib import Path
 import sys
+import urllib.parse
+from datetime import datetime
 
-# QScintilla Import
-try:
-    from PySide6.Qsci import QsciScintilla, QsciLexerPython
-except ImportError:
-    # Fallback falls QScintilla nicht verfügbar
-    QsciScintilla = None
-    QsciLexerPython = None
+# LSP-Module importieren
+from .lsp_client import LSPClient
+from .syntax_highlighter import LSPSyntaxHighlighter
+from .diagnostics_widget import DiagnosticsWidget
+
+# Editor-Import: Nur QTextEdit (kein QScintilla mehr)
+# WICHTIG: Nur eine Binding-Ebene (PySide6) - keine PyQt5/PyQt6
+QSCINTILLA_AVAILABLE = False  # QScintilla wird nicht mehr verwendet
+EDITOR_TYPE = "qtextedit"
+
+# Hilfsfunktionen werden nicht mehr benötigt (nur noch QTextEdit)
+
+class CustomTextEdit(QTextEdit):
+    """Custom QTextEdit mit LSP-Unterstützung, Syntax-Highlighting und Auto-Completion"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent_code_editor = None  # Referenz zum CodeEditor-Widget
+        self.lsp_completer = None  # Wird später von CodeEditor gesetzt
+        self._setup_basic_autocompletion()
+        self._setup_syntax_highlighting()
+    
+    def _setup_basic_autocompletion(self):
+        """Richtet grundlegende Auto-Vervollständigung ein (Fallback wenn LSP nicht verfügbar)"""
+        # API-Funktionen für Auto-Vervollständigung
+        api_keywords = [
+            "get_object", "get_all_objects",
+            "key_pressed", "key_down", "mouse_position",
+            "print_debug", "spawn_object",
+            "move_with_collision", "push_objects",
+            "lock_y_position", "unlock_y_position",
+        ]
+        
+        # GameObject-Attribute
+        gameobject_attrs = [
+            "x", "y", "width", "height",
+            "visible", "sprite", "id",
+            "collides_with", "is_ground", "is_camera", "layer",
+        ]
+        
+        # Python-Keywords
+        python_keywords = [
+            "def", "class", "if", "else", "elif", "for", "while",
+            "return", "True", "False", "None", "and", "or", "not",
+            "import", "from", "as", "pass", "break", "continue",
+            "try", "except", "finally", "raise", "with", "lambda",
+        ]
+        
+        # Alle Keywords zusammenfassen
+        all_keywords = api_keywords + gameobject_attrs + python_keywords
+        
+        # QCompleter erstellen (Fallback)
+        self.fallback_completer = QCompleter(all_keywords, self)
+        self.fallback_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.fallback_completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        self.fallback_completer.setModelSorting(QCompleter.ModelSorting.CaseInsensitivelySortedModel)
+    
+    def _setup_syntax_highlighting(self):
+        """Richtet Syntax-Highlighting ein"""
+        self.syntax_highlighter = LSPSyntaxHighlighter(self.document(), self)
+    
+    def keyPressEvent(self, event):
+        """Überschreibt KeyPressEvent für LSP-Auto-Completion"""
+        # Wenn LSP-Completer verfügbar ist, verwende diesen
+        if self.lsp_completer and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Tab):
+            # LSP-Completer behandelt diese Tasten
+            if hasattr(self.lsp_completer, 'popup') and self.lsp_completer.popup().isVisible():
+                self.lsp_completer.popup().hide()
+                return
+        
+        super().keyPressEvent(event)
+        
+        # Trigger LSP-Completion nach Tastendruck
+        if self.parent_code_editor and self.parent_code_editor.lsp_client:
+            cursor = self.textCursor()
+            char = event.text()
+            if char and (char.isalnum() or char in ['.', '_']):
+                # Trigger LSP-Completion
+                QTimer.singleShot(100, lambda: self.parent_code_editor._trigger_lsp_completion())
+    
+    def apply_syntax_highlighting(self, text: str):
+        """Wendet Syntax-Highlighting an"""
+        if self.syntax_highlighter:
+            self.syntax_highlighter.apply_syntax_highlighting(text)
+    
+    def apply_diagnostics(self, diagnostics: list):
+        """Wendet Diagnostics (Fehler-Unterstreichungen) an
+        
+        WICHTIG: Diese Funktion setzt nur Unterstreichungen, keine Syntax-Highlighting-Farben!
+        Syntax-Highlighting wird NUR durch self.syntax_highlighter.apply_syntax_highlighting() angewendet.
+        """
+        # WICHTIG: Verwende mergeCharFormat statt setCharFormat, um bestehende Formatierungen zu erhalten!
+        # Lösche alte Unterstreichungen (nur Unterstreichungen, keine Farben!)
+        cursor = QTextCursor(self.document())
+        cursor.select(QTextCursor.SelectionType.Document)
+        format_clear = QTextCharFormat()
+        format_clear.setUnderlineStyle(QTextCharFormat.UnderlineStyle.NoUnderline)
+        # mergeCharFormat behält bestehende Formatierungen (Farben) und ändert nur Unterstreichungen
+        cursor.mergeCharFormat(format_clear)
+        
+        # Wende neue Diagnostics an
+        for diagnostic in diagnostics:
+            severity = diagnostic.get("severity", 1)
+            range_info = diagnostic.get("range", {})
+            start = range_info.get("start", {})
+            end = range_info.get("end", {})
+            
+            start_line = start.get("line", 0)
+            start_char = start.get("character", 0)
+            end_line = end.get("line", 0)
+            end_char = end.get("character", 0)
+            
+            # Finde Positionen im Dokument
+            start_block = self.document().findBlockByNumber(start_line)
+            end_block = self.document().findBlockByNumber(end_line)
+            
+            if start_block.isValid() and end_block.isValid():
+                start_pos = start_block.position() + start_char
+                end_pos = end_block.position() + end_char
+                
+                cursor.setPosition(start_pos)
+                cursor.setPosition(end_pos, QTextCursor.MoveMode.KeepAnchor)
+                
+                # Format basierend auf Severity - NUR Unterstreichungen, keine Farben!
+                format_error = QTextCharFormat()
+                if severity == 1:  # Error
+                    format_error.setUnderlineColor(QColor(244, 67, 54))  # Rot
+                    format_error.setUnderlineStyle(QTextCharFormat.UnderlineStyle.WaveUnderline)
+                elif severity == 2:  # Warning
+                    format_error.setUnderlineColor(QColor(255, 152, 0))  # Orange
+                    format_error.setUnderlineStyle(QTextCharFormat.UnderlineStyle.WaveUnderline)
+                else:
+                    format_error.setUnderlineColor(QColor(156, 220, 254))  # Blau
+                    format_error.setUnderlineStyle(QTextCharFormat.UnderlineStyle.WaveUnderline)
+                
+                # mergeCharFormat behält bestehende Formatierungen (Syntax-Highlighting-Farben) und fügt nur Unterstreichungen hinzu
+                cursor.mergeCharFormat(format_error)
+    
+    def contextMenuEvent(self, event: QContextMenuEvent):
+        """Überschreibt das Standard-Kontextmenü und erweitert es"""
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #2d2d2d;
+                color: #d4d4d4;
+                border: 1px solid #3d3d3d;
+            }
+            QMenu::item {
+                padding: 5px 20px 5px 30px;
+            }
+            QMenu::item:selected {
+                background-color: #4a9eff;
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: #3d3d3d;
+                margin: 5px 0px;
+            }
+        """)
+        
+        # Standard-Aktionen
+        undo_action = menu.addAction("↶ Rückgängig")
+        undo_action.setShortcut("Ctrl+Z")
+        undo_action.triggered.connect(self.undo)
+        undo_action.setEnabled(self.document().isUndoAvailable())
+        
+        redo_action = menu.addAction("↷ Wiederherstellen")
+        redo_action.setShortcut("Ctrl+Y")
+        redo_action.triggered.connect(self.redo)
+        redo_action.setEnabled(self.document().isRedoAvailable())
+        
+        menu.addSeparator()
+        
+        cut_action = menu.addAction("✂ Ausschneiden")
+        cut_action.setShortcut("Ctrl+X")
+        cut_action.triggered.connect(self.cut)
+        cut_action.setEnabled(self.textCursor().hasSelection())
+        
+        copy_action = menu.addAction("📋 Kopieren")
+        copy_action.setShortcut("Ctrl+C")
+        copy_action.triggered.connect(self.copy)
+        copy_action.setEnabled(self.textCursor().hasSelection())
+        
+        paste_action = menu.addAction("📄 Einfügen")
+        paste_action.setShortcut("Ctrl+V")
+        paste_action.triggered.connect(self.paste)
+        
+        menu.addSeparator()
+        
+        select_all_action = menu.addAction("✓ Alle auswählen")
+        select_all_action.setShortcut("Ctrl+A")
+        select_all_action.triggered.connect(self.selectAll)
+        
+        menu.addSeparator()
+        
+        # Einstellungen
+        if self.parent_code_editor:
+            settings_action = menu.addAction("⚙ Einstellungen...")
+            settings_action.triggered.connect(self.parent_code_editor._open_settings)
+        
+        menu.exec(event.globalPos())
 
 
 class CodeEditor(QWidget):
@@ -31,13 +230,36 @@ class CodeEditor(QWidget):
         self.current_object_id: str | None = None  # ID des aktuell ausgewählten Objekts
         self.undo_redo_manager = None  # Wird vom main_window gesetzt
         self.scene_canvas = None  # Wird vom main_window gesetzt (für Objekt-Updates)
+        self.console = None  # Wird vom main_window gesetzt (für Debug-Ausgaben)
         self.last_text = ""  # Letzter Text für Undo/Redo
+        self.last_syntax_text = ""  # Letzter Text für Syntax-Highlighting-Check
+        self.debug_syntax = True  # Debug-Ausgaben für Syntax-Highlighting (kann später deaktiviert werden)
         self.text_change_timer = QTimer()
         self.text_change_timer.setSingleShot(True)
         self.text_change_timer.timeout.connect(self._on_text_changed_delayed)
         self.auto_save_timer = QTimer()
         self.auto_save_timer.timeout.connect(self._auto_save)
         self.auto_save_timer.start(5000)  # Alle 5 Sekunden
+        
+        # LSP-Client
+        self.lsp_client: Optional[LSPClient] = None
+        self.lsp_document_version = 0
+        self.lsp_document_uri: Optional[str] = None
+        self.lsp_update_timer = QTimer()
+        self.lsp_update_timer.setSingleShot(True)
+        self.lsp_update_timer.timeout.connect(self._update_lsp_document)
+        
+        # Flag um rekursive Aufrufe zu verhindern
+        self._updating_syntax = False
+        self._updating_lsp = False
+        
+        # Timer für Syntax-Highlighting Debouncing (sehr kurz für bessere Reaktionszeit)
+        self.syntax_update_timer = QTimer()
+        self.syntax_update_timer.setSingleShot(True)
+        self.syntax_update_timer.timeout.connect(self._apply_syntax_highlighting)
+        
+        # Lexer für späteren Zugriff (für Einstellungen)
+        self.lexer = None
         
         self._init_ui()
     
@@ -172,161 +394,57 @@ class CodeEditor(QWidget):
         # Hilfe-Overlay (wird später erstellt wenn benötigt)
         self.help_overlay = None
         
-        # QScintilla Editor
-        if QsciScintilla:
-            self.editor = QsciScintilla()
-            
-            # Python Lexer mit verbessertem Syntax-Highlighting
-            lexer = QsciLexerPython()
-            
-            # Monospace-Font für bessere Lesbarkeit
-            from PySide6.QtGui import QFont
-            font = QFont("Consolas", 11)
-            font.setStyleHint(QFont.StyleHint.Monospace)
-            lexer.setFont(font, 0)  # Standard-Font für alle Styles
-            
-            # Syntax-Highlighting-Farben (dunkles Theme) - Alle Styles konfigurieren
-            # QsciLexerPython Style-Indizes:
-            # 0 = Default, 1 = Comment, 2 = Number, 3 = String, 4 = Keyword, 
-            # 5 = Triple quotes, 6 = Triple double quotes, 7 = Class name,
-            # 8 = Function/method name, 9 = Operator, 10 = Identifier, 11 = Comment block,
-            # 12 = Unclosed string, 13 = Highlighted identifier, 14 = Decorator
-            
-            # Default Text
-            lexer.setColor(QColor(212, 212, 212), 0)  # #d4d4d4 - Helles Grau
-            lexer.setPaper(QColor(30, 30, 30), 0)  # #1e1e1e - Dunkler Hintergrund
-            
-            # Kommentare
-            lexer.setColor(QColor(100, 100, 100), 1)  # #646464 - Dunkelgrau für Kommentare
-            lexer.setPaper(QColor(30, 30, 30), 1)
-            
-            # Zahlen
-            lexer.setColor(QColor(181, 206, 168), 2)  # #b5cea8 - Hellgrün für Zahlen
-            lexer.setPaper(QColor(30, 30, 30), 2)
-            
-            # Strings
-            lexer.setColor(QColor(206, 145, 120), 3)  # #ce9178 - Orange für Strings
-            lexer.setPaper(QColor(30, 30, 30), 3)
-            
-            # Keywords (if, def, for, etc.)
-            lexer.setColor(QColor(86, 156, 214), 4)  # #569cd6 - Blau für Keywords
-            lexer.setPaper(QColor(30, 30, 30), 4)
-            
-            # Triple quotes
-            lexer.setColor(QColor(206, 145, 120), 5)  # Orange wie Strings
-            lexer.setPaper(QColor(30, 30, 30), 5)
-            lexer.setColor(QColor(206, 145, 120), 6)  # Triple double quotes
-            lexer.setPaper(QColor(30, 30, 30), 6)
-            
-            # Class names
-            lexer.setColor(QColor(78, 201, 176), 7)  # #4ec9b0 - Türkis für Klassen
-            lexer.setPaper(QColor(30, 30, 30), 7)
-            
-            # Function/method names
-            lexer.setColor(QColor(220, 220, 170), 8)  # #dcdcaa - Gelb für Funktionen
-            lexer.setPaper(QColor(30, 30, 30), 8)
-            
-            # Operators
-            lexer.setColor(QColor(212, 212, 212), 9)  # #d4d4d4 - Weiß für Operatoren
-            lexer.setPaper(QColor(30, 30, 30), 9)
-            
-            # Identifiers (Variablen)
-            lexer.setColor(QColor(156, 220, 254), 10)  # #9cdcfe - Hellblau für Variablen
-            lexer.setPaper(QColor(30, 30, 30), 10)
-            
-            # Comment blocks
-            lexer.setColor(QColor(100, 100, 100), 11)  # Dunkelgrau wie Kommentare
-            lexer.setPaper(QColor(30, 30, 30), 11)
-            
-            # Unclosed strings
-            lexer.setColor(QColor(206, 145, 120), 12)  # Orange
-            lexer.setPaper(QColor(30, 30, 30), 12)
-            
-            # Highlighted identifier
-            lexer.setColor(QColor(156, 220, 254), 13)  # Hellblau
-            lexer.setPaper(QColor(30, 30, 30), 13)
-            
-            # Decorator
-            lexer.setColor(QColor(220, 220, 170), 14)  # Gelb
-            lexer.setPaper(QColor(30, 30, 30), 14)
-            
-            # Standard-Hintergrund für alle Styles
-            lexer.setDefaultPaper(QColor(30, 30, 30))  # #1e1e1e
-            lexer.setDefaultColor(QColor(212, 212, 212))  # #d4d4d4
-            
-            self.editor.setLexer(lexer)
-            
-            # Einstellungen für bessere Formatierung
-            self.editor.setUtf8(True)
-            self.editor.setAutoIndent(True)
-            self.editor.setIndentationGuides(True)
-            self.editor.setTabWidth(4)
-            self.editor.setIndentationsUseTabs(False)
-            
-            # Auto-Formatierung aktivieren (Dark-Mode)
-            self.editor.setBraceMatching(QsciScintilla.BraceMatch.SloppyBraceMatch)
-            self.editor.setMatchedBraceBackgroundColor(QColor(60, 60, 60))  # Heller für bessere Sichtbarkeit
-            self.editor.setMatchedBraceForegroundColor(QColor(255, 255, 0))  # Gelb für Klammern
-            
-            # Auto-Completion
-            self.editor.setAutoCompletionThreshold(2)  # Früher aktivieren
-            self.editor.setAutoCompletionSource(QsciScintilla.AcsAll)
-            self.editor.setAutoCompletionCaseSensitivity(False)
-            self.editor.setAutoCompletionReplaceWord(True)
-            
-            # Zeilennummern (Dark-Mode)
-            self.editor.setMarginsBackgroundColor(QColor(30, 30, 30))  # #1e1e1e
-            self.editor.setMarginsForegroundColor(QColor(128, 128, 128))  # Grau für Zeilennummern
-            self.editor.setMarginLineNumbers(0, True)
-            # Margin-Breite dynamisch basierend auf Zeilenanzahl (mindestens 4 Ziffern)
-            self.editor.setMarginWidth(0, "00000")  # 5 Ziffern für bis zu 99999 Zeilen
-            
-            # Farbschema (Dark-Mode)
-            self.editor.setPaper(QColor(30, 30, 30))  # #1e1e1e - Dunkler Hintergrund
-            self.editor.setColor(QColor(212, 212, 212))  # #d4d4d4 - Helles Text
-            
-            # Caret (Cursor) sichtbarer machen (Dark-Mode)
-            self.editor.setCaretForegroundColor(QColor(255, 255, 255))
-            self.editor.setCaretLineVisible(True)
-            self.editor.setCaretLineBackgroundColor(QColor(42, 42, 42))  # Etwas heller als Hintergrund
-            
-            # Selection (Auswahl) - Dark-Mode
-            self.editor.setSelectionBackgroundColor(QColor(38, 79, 120))  # Blau für Auswahl
-            self.editor.setSelectionForegroundColor(QColor(255, 255, 255))
-            
-            # Text geändert (mit Debouncing für Undo/Redo)
-            self.editor.textChanged.connect(self._on_text_changed_with_undo)
-            
-            # Event-Handler für Einfügen (Auto-Formatierung)
-            self.editor.modificationChanged.connect(self._on_modification_changed)
-            
-            # EOL (End of Line) Mode
-            self.editor.setEolMode(QsciScintilla.EolMode.EolUnix)  # Unix-Style (\n)
-            
-            # Syntax-Highlighting ist bereits aktiv durch setLexer() oben
-            # QScintilla aktualisiert Syntax-Highlighting automatisch bei Textänderungen
-            # Der Lexer ist bereits konfiguriert und arbeitet live während des Schreibens
-            
-        else:
-            # Fallback: Einfacher QTextEdit wenn QScintilla nicht verfügbar (Dark-Mode)
-            from PySide6.QtWidgets import QTextEdit
-            from PySide6.QtGui import QFont
-            
-            self.editor = QTextEdit()
-            self.editor.setFont(QFont("Consolas", 10))
-            self.editor.setStyleSheet("""
-                QTextEdit {
-                    background-color: #1e1e1e;
-                    color: #d4d4d4;
-                    border: 1px solid #3d3d3d;
-                }
-            """)
-            self.editor.textChanged.connect(self._on_text_changed_with_undo)
-            # QScintilla ist optional - keine Warnung ausgeben
-            pass
+        # Splitter für Editor + Diagnostics
+        splitter = QSplitter(Qt.Orientation.Vertical)
         
-        layout.addWidget(self.editor)
+        # Code Editor: QTextEdit mit LSP-Unterstützung
+        self.editor = CustomTextEdit()
+        self.editor.parent_code_editor = self  # Referenz für Einstellungen
+        
+        # Word Wrap aktivieren (Zeilenumbrüche wenn Fenster zu schmal wird)
+        self.editor.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        
+        # Monospace-Font für bessere Lesbarkeit
+        font = QFont("Consolas", 11)
+        font.setStyleHint(QFont.StyleHint.Monospace)
+        self.editor.setFont(font)
+        
+        # Dark-Mode Styling
+        # WICHTIG: Textfarbe NICHT über Stylesheet setzen, da das die Syntax-Highlighting-Formatierungen überschreibt
+        # Die Textfarbe wird stattdessen über die Syntax-Highlighter-Formate gesetzt
+        self.editor.setStyleSheet("""
+            QTextEdit {
+                background-color: #1e1e1e;
+                border: 1px solid #3d3d3d;
+                font-family: 'Consolas', 'Courier New', monospace;
+            }
+        """)
+        
+        # Text geändert (mit Debouncing für Undo/Redo)
+        self.editor.textChanged.connect(self._on_text_changed_with_undo)
+        self.editor.textChanged.connect(self._on_text_changed_for_lsp)
+        
+        # Syntax-Highlighting bei Textänderung
+        self.editor.textChanged.connect(self._on_text_changed_for_syntax)
+        
+        # Diagnostics Widget
+        self.diagnostics_widget = DiagnosticsWidget()
+        self.diagnostics_widget.setMaximumHeight(150)  # Begrenzte Höhe
+        
+        # Splitter konfigurieren
+        splitter.addWidget(self.editor)
+        splitter.addWidget(self.diagnostics_widget)
+        splitter.setSizes([800, 200])  # Editor größer, Diagnostics kleiner
+        splitter.setCollapsible(0, False)  # Editor nicht zusammenklappbar
+        splitter.setCollapsible(1, True)   # Diagnostics zusammenklappbar
+        
+        # Lexer auf None setzen (wird nicht mehr verwendet)
+        self.lexer = None
+        
+        layout.addWidget(splitter)
         self.setLayout(layout)
+        
+        # LSP-Client wird später initialisiert (wenn Projekt geladen wird)
     
     def _create_play_icon(self):
         """Erstellt ein grünes Dreieck-Icon für den Start-Button"""
@@ -356,7 +474,35 @@ class CodeEditor(QWidget):
         """Lädt Projekt und öffnet game.py"""
         self.project_path = project_path
         self.current_object_id = None
+        
+        # LSP-Client starten
+        self._init_lsp_client()
+        
         self._load_code()
+        self._load_editor_settings()
+    
+    def _init_lsp_client(self):
+        """Initialisiert den LSP-Client"""
+        if not self.project_path:
+            return
+        
+        try:
+            self.lsp_client = LSPClient(self.project_path, self)
+            
+            # Signals verbinden
+            self.lsp_client.diagnostics_received.connect(self._on_lsp_diagnostics)
+            self.lsp_client.completion_received.connect(self._on_lsp_completion)
+            self.lsp_client.hover_received.connect(self._on_lsp_hover)
+            
+            # Server starten
+            if self.lsp_client.start_server():
+                print("LSP-Server gestartet")
+            else:
+                print("WARNUNG: LSP-Server konnte nicht gestartet werden")
+                self.lsp_client = None
+        except Exception as e:
+            print(f"Fehler beim Initialisieren des LSP-Clients: {e}")
+            self.lsp_client = None
     
     def set_object(self, object_id: str | None, object_data: dict | None = None):
         """Setzt das aktuell ausgewählte Objekt und lädt dessen Code
@@ -411,6 +557,16 @@ class CodeEditor(QWidget):
                 # Letzten Text für Undo/Redo speichern
                 self.last_text = code
                 
+                # LSP-Document öffnen
+                self._open_lsp_document(code_file, code)
+                
+                # Cache zurücksetzen, damit Highlighting beim Laden ausgeführt wird
+                if hasattr(self.editor, 'syntax_highlighter') and self.editor.syntax_highlighter:
+                    self.editor.syntax_highlighter.reset_cache()
+                
+                # Syntax-Highlighting sofort anwenden (nach dem Laden)
+                QTimer.singleShot(100, lambda: self._apply_syntax_highlighting())
+                
             except Exception as e:
                 print(f"Fehler beim Laden von game.py: {e}")
         else:
@@ -435,6 +591,16 @@ def update():
             
             # Letzten Text für Undo/Redo speichern
             self.last_text = default_code
+            
+            # LSP-Document öffnen (auch für neue Datei)
+            self._open_lsp_document(code_file, default_code)
+            
+            # Cache zurücksetzen, damit Highlighting beim Laden ausgeführt wird
+            if hasattr(self.editor, 'syntax_highlighter') and self.editor.syntax_highlighter:
+                self.editor.syntax_highlighter.reset_cache()
+            
+            # Syntax-Highlighting sofort anwenden (nach dem Laden)
+            QTimer.singleShot(100, lambda: self._apply_syntax_highlighting())
     
     def _load_object_code(self, object_id: str, object_data: dict):
         """Lädt Code für ein spezifisches Objekt
@@ -504,12 +670,12 @@ def update():
         # Letzten Text für Undo/Redo speichern
         self.last_text = code
         
-        # Syntax-Highlighting aktualisieren nach dem Laden
-        if QsciScintilla and hasattr(self.editor, 'colourise'):
-            try:
-                self.editor.colourise(0, -1)
-            except:
-                pass
+        # Cache zurücksetzen, damit Highlighting beim Laden ausgeführt wird
+        if hasattr(self.editor, 'syntax_highlighter') and self.editor.syntax_highlighter:
+            self.editor.syntax_highlighter.reset_cache()
+        
+        # Syntax-Highlighting sofort anwenden (nach dem Laden)
+        QTimer.singleShot(100, lambda: self._apply_syntax_highlighting())
     
     def _save_object_code(self, object_id: str):
         """Speichert Code für ein spezifisches Objekt in die Szene"""
@@ -646,13 +812,6 @@ def update():
     def _on_modification_changed(self, modified: bool):
         """Wird aufgerufen wenn Dokument geändert wird - aktualisiert Syntax-Highlighting"""
         # QScintilla aktualisiert Syntax-Highlighting automatisch, aber wir können es explizit triggern
-        if hasattr(self, 'editor') and self.editor and QsciScintilla:
-            try:
-                # Aktualisiere Syntax-Highlighting für den gesamten Text
-                # Dies stellt sicher, dass alle Änderungen sofort farbig werden
-                self.editor.colourise(0, -1)
-            except:
-                pass  # Falls Fehler, ignorieren (QScintilla macht es automatisch)
     
     def _toggle_help_overlay(self):
         """Zeigt/versteckt das Hilfe-Fenster"""
@@ -975,3 +1134,310 @@ def update():
     def set_stop_enabled(self, enabled: bool):
         """Aktiviert/deaktiviert den Stop-Button"""
         self.stop_button.setEnabled(enabled)
+    
+    
+    def _open_settings(self):
+        """Öffnet Einstellungs-Dialog"""
+        from .code_editor_settings import CodeEditorSettingsDialog
+        
+        if not self.project_path:
+            return
+        
+        dialog = CodeEditorSettingsDialog(self.project_path, self)
+        dialog.settings_changed.connect(self._apply_settings)
+        dialog.exec()
+    
+    def _apply_settings(self, settings: dict):
+        """Wendet Einstellungen an"""
+        # Font-Größe
+        font_size = settings.get("font_size", 11)
+        font = QFont("Consolas", font_size)
+        font.setStyleHint(QFont.StyleHint.Monospace)
+        
+        # QTextEdit: Font setzen
+        if hasattr(self.editor, 'setFont'):
+            self.editor.setFont(font)
+        
+        # Farben über Stylesheet
+        def hex_to_color_str(hex_str: str) -> str:
+            """Konvertiert Hex-String zu CSS-Farbstring"""
+            hex_str = hex_str.lstrip('#')
+            if len(hex_str) == 6:
+                return f"#{hex_str}"
+            return "#d4d4d4"  # Fallback
+        
+        bg_color = hex_to_color_str(settings.get("background", "#1e1e1e"))
+        # WICHTIG: Textfarbe NICHT über Stylesheet setzen, da das die Syntax-Highlighting-Formatierungen überschreibt
+        # Die Textfarbe wird stattdessen über die Syntax-Highlighter-Formate gesetzt
+        
+        self.editor.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: {bg_color};
+                border: 1px solid #3d3d3d;
+                font-family: 'Consolas', 'Courier New', monospace;
+            }}
+        """)
+        
+        # Syntax-Highlighter-Farben aktualisieren (inkl. Standard-Textfarbe)
+        if hasattr(self.editor, 'syntax_highlighter') and self.editor.syntax_highlighter:
+            syntax_colors = {
+                "default": settings.get("default", "#d4d4d4"),  # Standard-Textfarbe
+                "comment": settings.get("comment", "#646464"),
+                "number": settings.get("number", "#b5cea8"),
+                "string": settings.get("string", "#ec7600"),
+                "keyword": settings.get("keyword", "#4faff0"),
+                "class": settings.get("class", "#4ec9b0"),
+                "function": settings.get("function", "#dcdc64"),
+                "variable": settings.get("variable", "#9cdcfe"),
+                "operator": settings.get("operator", "#b4b4ff"),
+            }
+            self.editor.syntax_highlighter.update_formats(syntax_colors)
+            
+            # Syntax-Highlighting neu anwenden
+            if hasattr(self.editor, 'text'):
+                text = self.editor.text()
+            else:
+                text = self.editor.toPlainText()
+            self.editor.apply_syntax_highlighting(text)
+    
+    def _load_editor_settings(self):
+        """Lädt Editor-Einstellungen beim Start"""
+        if not self.project_path:
+            return
+        
+        settings_file = self.project_path / "code_editor_settings.json"
+        if settings_file.exists():
+            try:
+                import json
+                with open(settings_file, 'r', encoding='utf-8') as f:
+                    settings_data = json.load(f)
+                
+                # Aktuelles Preset laden
+                current_preset = settings_data.get("current_preset", "default")
+                custom_presets = settings_data.get("custom_presets", {})
+                
+                # Preset-Daten holen
+                if current_preset in custom_presets:
+                    preset = custom_presets[current_preset]
+                elif current_preset == "light_mode":
+                    from .code_editor_settings import CodeEditorSettingsDialog
+                    dialog = CodeEditorSettingsDialog(self.project_path, self)
+                    preset = dialog._get_light_mode_preset()
+                elif current_preset == "high_contrast":
+                    from .code_editor_settings import CodeEditorSettingsDialog
+                    dialog = CodeEditorSettingsDialog(self.project_path, self)
+                    preset = dialog._get_high_contrast_preset()
+                elif current_preset == "matrix_mode":
+                    from .code_editor_settings import CodeEditorSettingsDialog
+                    dialog = CodeEditorSettingsDialog(self.project_path, self)
+                    preset = dialog._get_matrix_mode_preset()
+                else:
+                    # Default
+                    from .code_editor_settings import CodeEditorSettingsDialog
+                    dialog = CodeEditorSettingsDialog(self.project_path, self)
+                    preset = dialog._get_default_preset()
+                
+                # Einstellungen anwenden
+                self._apply_settings(preset)
+            except Exception as e:
+                print(f"Fehler beim Laden der Editor-Einstellungen: {e}")
+    
+    # ========== LSP-Methoden ==========
+    
+    def _open_lsp_document(self, file_path: Path, text: str):
+        """Öffnet ein Dokument im LSP-Server"""
+        if not self.lsp_client:
+            return
+        
+        # URI erstellen (file:///path/to/file)
+        uri = f"file://{file_path.absolute().as_posix()}"
+        self.lsp_document_uri = uri
+        self.lsp_document_version = 1
+        
+        # Document im Server öffnen
+        self.lsp_client.open_document(uri, text, "python")
+    
+    def _update_lsp_document(self):
+        """Aktualisiert das Dokument im LSP-Server (mit Debouncing)"""
+        if not self.lsp_client or not self.lsp_document_uri or self._updating_lsp:
+            return
+        
+        self._updating_lsp = True
+        try:
+            # Text aus Editor holen
+            if hasattr(self.editor, 'text'):
+                text = self.editor.text()
+            else:
+                text = self.editor.toPlainText()
+            
+            # Version erhöhen
+            self.lsp_document_version += 1
+            
+            # Document aktualisieren
+            self.lsp_client.update_document(self.lsp_document_uri, text, self.lsp_document_version)
+        finally:
+            self._updating_lsp = False
+    
+    def _on_text_changed_for_lsp(self):
+        """Wird aufgerufen wenn Text geändert wird (für LSP)"""
+        if not self.lsp_client or self._updating_lsp:
+            return
+        
+        # Debouncing: Warte 300ms bevor LSP-Update gesendet wird
+        self.lsp_update_timer.stop()
+        self.lsp_update_timer.start(300)
+    
+    def _on_text_changed_for_syntax(self):
+        """Wird aufgerufen wenn Text geändert wird (für Syntax-Highlighting)"""
+        # WICHTIG: Verhindere Endlosschleife - wenn Highlighting bereits läuft, nicht erneut starten
+        if self._updating_syntax:
+            if self.debug_syntax and self.console:
+                timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]
+                self.console.append_output(f"[{timestamp}] [SYNTAX] _on_text_changed_for_syntax: ÜBERSPRUNGEN (_updating_syntax=True)")
+            return
+        
+        # Prüfe ob Text sich tatsächlich geändert hat (textChanged wird auch bei Format-Änderungen getriggert!)
+        current_text = self.editor.toPlainText() if hasattr(self.editor, 'toPlainText') else ""
+        if current_text == self.last_syntax_text:
+            # Text hat sich nicht geändert - überspringen (verhindert Flackern)
+            if self.debug_syntax and self.console:
+                timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]
+                self.console.append_output(f"[{timestamp}] [SYNTAX] _on_text_changed_for_syntax: ÜBERSPRUNGEN (Text unverändert, {len(current_text)} Zeichen)")
+            return
+        
+        # Debug-Ausgabe
+        if self.debug_syntax and self.console:
+            timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]
+            self.console.append_output(f"[{timestamp}] [SYNTAX] _on_text_changed_for_syntax: Timer gestartet (Text geändert: {len(self.last_syntax_text)} -> {len(current_text)} Zeichen)")
+        
+        # Text als "letzten" Text speichern
+        self.last_syntax_text = current_text
+        
+        # Debouncing: Timer zurücksetzen (wird nach 30ms ausgeführt)
+        self.syntax_update_timer.stop()
+        self.syntax_update_timer.start(30)  # Sehr kurze Verzögerung für bessere Reaktionszeit
+    
+    def _apply_syntax_highlighting(self):
+        """Wendet Syntax-Highlighting an (wird nach Debouncing aufgerufen)"""
+        if self._updating_syntax:
+            if self.debug_syntax and self.console:
+                timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]
+                self.console.append_output(f"[{timestamp}] [SYNTAX] _apply_syntax_highlighting: ÜBERSPRUNGEN (_updating_syntax=True)")
+            return
+        
+        # Debug-Ausgabe
+        if self.debug_syntax and self.console:
+            timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]
+            self.console.append_output(f"[{timestamp}] [SYNTAX] _apply_syntax_highlighting: START")
+        
+        self._updating_syntax = True
+        
+        # WICHTIG: Blockiere textChanged Signale des Editors während des Highlightings
+        # Das verhindert, dass das Formatieren eine Endlosschleife auslöst
+        editor_signals_blocked = False
+        if hasattr(self.editor, 'blockSignals'):
+            editor_signals_blocked = self.editor.blockSignals(True)
+        
+        try:
+            if hasattr(self.editor, 'text'):
+                text = self.editor.text()
+            else:
+                text = self.editor.toPlainText()
+            
+            # Debug-Ausgabe: Text-Länge
+            if self.debug_syntax and self.console:
+                timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]
+                self.console.append_output(f"[{timestamp}] [SYNTAX] Text geholt: {len(text)} Zeichen")
+            
+            # Syntax-Highlighting anwenden (einfache Regex-Version)
+            if hasattr(self.editor, 'apply_syntax_highlighting'):
+                self.editor.apply_syntax_highlighting(text)
+            
+            # WICHTIG: last_syntax_text nach dem Highlighting aktualisieren, damit textChanged nicht erneut getriggert wird
+            self.last_syntax_text = text
+        finally:
+            # Signale wieder aktivieren
+            if hasattr(self.editor, 'blockSignals'):
+                self.editor.blockSignals(editor_signals_blocked)
+            
+            self._updating_syntax = False
+            
+            # Debug-Ausgabe: Ende
+            if self.debug_syntax and self.console:
+                timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]
+                self.console.append_output(f"[{timestamp}] [SYNTAX] _apply_syntax_highlighting: ENDE")
+    
+    def _trigger_lsp_completion(self):
+        """Triggert LSP-Auto-Vervollständigung"""
+        if not self.lsp_client or not self.lsp_document_uri:
+            return
+        
+        cursor = self.editor.textCursor()
+        line = cursor.blockNumber()
+        character = cursor.positionInBlock()
+        
+        def on_completion(result, error):
+            if error:
+                return
+            
+            # Completion-Items verarbeiten
+            items = result.get("items", []) if result else []
+            if items:
+                # QCompleter mit LSP-Items aktualisieren
+                completions = []
+                for item in items:
+                    label = item.get("label", "")
+                    detail = item.get("detail", "")
+                    if detail:
+                        completions.append(f"{label} - {detail}")
+                    else:
+                        completions.append(label)
+                
+                # Completer aktualisieren (QTextEdit hat keine setCompleter-Methode)
+                # Wir speichern die Completions und zeigen sie manuell an
+                if not hasattr(self, 'lsp_completer') or not self.lsp_completer:
+                    from PySide6.QtWidgets import QCompleter
+                    from PySide6.QtCore import QStringListModel
+                    model = QStringListModel(completions, self)
+                    self.lsp_completer = QCompleter(model, self)
+                    self.lsp_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+                    self.lsp_completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+                    self.lsp_completer.setWidget(self.editor)  # Widget setzen, aber nicht setCompleter verwenden
+                    self.editor.lsp_completer = self.lsp_completer
+                else:
+                    model = QStringListModel(completions, self)
+                    self.lsp_completer.setModel(model)
+                
+                # Completion manuell anzeigen (QTextEdit hat keine setCompleter)
+                # Wir zeigen die Completion über ein Popup an
+                cursor = self.editor.textCursor()
+                rect = self.editor.cursorRect(cursor)
+                self.lsp_completer.complete(rect)  # Popup an Cursor-Position anzeigen
+        
+        self.lsp_client.request_completion(self.lsp_document_uri, line, character, on_completion)
+    
+    def _on_lsp_diagnostics(self, params: dict):
+        """Wird aufgerufen wenn LSP Diagnostics empfangen werden"""
+        uri = params.get("uri", "")
+        diagnostics = params.get("diagnostics", [])
+        
+        # Nur Diagnostics für aktuelles Document anzeigen
+        if uri == self.lsp_document_uri:
+            # Diagnostics im Widget anzeigen
+            if self.diagnostics_widget:
+                self.diagnostics_widget.update_diagnostics(diagnostics, uri)
+            
+            # Unterstreichungen im Editor anwenden
+            if hasattr(self.editor, 'apply_diagnostics'):
+                self.editor.apply_diagnostics(diagnostics)
+    
+    def _on_lsp_completion(self, items: list):
+        """Wird aufgerufen wenn LSP Completion empfangen wird"""
+        # Wird bereits in _trigger_lsp_completion behandelt
+        pass
+    
+    def _on_lsp_hover(self, result: dict):
+        """Wird aufgerufen wenn LSP Hover-Informationen empfangen werden"""
+        # Kann später für Tooltips verwendet werden
+        pass
+    

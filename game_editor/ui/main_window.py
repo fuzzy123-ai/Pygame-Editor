@@ -384,6 +384,9 @@ class EditorMainWindow(QMainWindow):
             # Scene Canvas Referenz an Code-Editor übergeben (für Objekt-Updates)
             if self.scene_canvas:
                 self.code_editor.scene_canvas = self.scene_canvas
+            # Console Referenz an Code-Editor übergeben (für Debug-Ausgaben)
+            if self.console:
+                self.code_editor.console = self.console
             # Undo/Redo Buttons an Code-Editor übergeben
             if hasattr(self, 'undo_button') and hasattr(self, 'redo_button'):
                 self.code_editor.set_undo_redo_buttons(self.undo_button, self.redo_button)
