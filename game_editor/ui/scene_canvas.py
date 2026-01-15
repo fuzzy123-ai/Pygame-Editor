@@ -464,6 +464,43 @@ class SceneCanvas(QWidget):
         self.canvas.setCursor(Qt.CursorShape.ArrowCursor)
         self.canvas.update()
     
+    def _is_grid_position_free_in_layer(self, grid_cell_x: int, grid_cell_y: int, layer: str, exclude_obj_ids: set = None, exclude_new_objects: list = None) -> bool:
+        """Prüft ob eine Grid-Position im angegebenen Layer frei ist"""
+        if exclude_obj_ids is None:
+            exclude_obj_ids = set()
+        if exclude_new_objects is None:
+            exclude_new_objects = []
+        
+        # Prüfe gegen bestehende Objekte im gleichen Layer
+        for other_obj in self.objects:
+            other_id = other_obj.get("id")
+            # Ignoriere ausgeschlossene Objekte
+            if other_id in exclude_obj_ids:
+                continue
+            
+            other_layer = other_obj.get("layer", "default")
+            # Nur Objekte im gleichen Layer prüfen
+            if other_layer != layer:
+                continue
+            
+            other_x = other_obj.get("x", 0)
+            other_y = other_obj.get("y", 0)
+            other_grid_x = other_x // self.grid_size
+            other_grid_y = other_y // self.grid_size
+            if other_grid_x == grid_cell_x and other_grid_y == grid_cell_y:
+                return False
+        
+        # Prüfe auch gegen bereits in dieser Runde hinzugefügte Objekte
+        for already_added in exclude_new_objects:
+            other_x = already_added.get("x", 0)
+            other_y = already_added.get("y", 0)
+            other_grid_x = other_x // self.grid_size
+            other_grid_y = other_y // self.grid_size
+            if other_grid_x == grid_cell_x and other_grid_y == grid_cell_y:
+                return False
+        
+        return True
+    
     def _place_paste_preview(self):
         """Platziert die Paste-Vorschau-Objekte tatsächlich in der Szene"""
         if not self._paste_preview_mode or not self._paste_preview_objects:
@@ -472,28 +509,12 @@ class SceneCanvas(QWidget):
         new_objects = []
         generated_ids = set()
         
-        # Hilfsfunktion: Prüft ob eine Grid-Position frei ist
+        # Hilfsfunktion: Prüft ob eine Grid-Position frei ist (im aktuellen Layer)
         def is_position_free(grid_cell_x: int, grid_cell_y: int, exclude_new_objects: list = None) -> bool:
-            if exclude_new_objects is None:
-                exclude_new_objects = []
-            
-            for other_obj in self.objects:
-                other_x = other_obj.get("x", 0)
-                other_y = other_obj.get("y", 0)
-                other_grid_x = other_x // self.grid_size
-                other_grid_y = other_y // self.grid_size
-                if other_grid_x == grid_cell_x and other_grid_y == grid_cell_y:
-                    return False
-            
-            for already_added in exclude_new_objects:
-                other_x = already_added.get("x", 0)
-                other_y = already_added.get("y", 0)
-                other_grid_x = other_x // self.grid_size
-                other_grid_y = other_y // self.grid_size
-                if other_grid_x == grid_cell_x and other_grid_y == grid_cell_y:
-                    return False
-            
-            return True
+            return self._is_grid_position_free_in_layer(
+                grid_cell_x, grid_cell_y, self.current_layer,
+                exclude_obj_ids=set(), exclude_new_objects=exclude_new_objects
+            )
         
         # Position-Usage für automatische Verschiebung
         position_usage = {}
@@ -1154,18 +1175,13 @@ class SceneCanvas(QWidget):
                 grid_x = int(grid_x)
                 grid_y = int(grid_y)
                 
-                # Prüfen ob Position frei ist
+                # Prüfen ob Position frei ist (im aktuellen Layer)
                 grid_cell_x = grid_x // self.grid_size
                 grid_cell_y = grid_y // self.grid_size
-                position_free = True
-                for other_obj in self.objects:
-                    other_x = other_obj.get("x", 0)
-                    other_y = other_obj.get("y", 0)
-                    other_grid_x = other_x // self.grid_size
-                    other_grid_y = other_y // self.grid_size
-                    if other_grid_x == grid_cell_x and other_grid_y == grid_cell_y:
-                        position_free = False
-                        break
+                position_free = self._is_grid_position_free_in_layer(
+                    grid_cell_x, grid_cell_y, self.current_layer,
+                    exclude_obj_ids=set(), exclude_new_objects=[]
+                )
                 
                 if position_free:
                     new_obj["x"] = grid_x
@@ -1396,20 +1412,13 @@ class SceneCanvas(QWidget):
             "ground": False  # Standard: kein Ground
         }
         
-        # Prüfen ob bereits ein Objekt an dieser Grid-Position existiert
-        # Nur wenn es im selben Layer ist, verhindern wir doppelte Platzierung
-        grid_x = x // self.grid_size
-        grid_y = y // self.grid_size
-        for existing_obj in self.objects:
-            existing_grid_x = existing_obj.get("x", 0) // self.grid_size
-            existing_grid_y = existing_obj.get("y", 0) // self.grid_size
-            existing_layer = existing_obj.get("layer", "default")
-            if (existing_grid_x == grid_x and existing_grid_y == grid_y and 
-                existing_layer == self.current_layer):
-                # Objekt existiert bereits an dieser Position im selben Layer
-                # Erlaube aber Objekte in anderen Layern an derselben Position
-                print(f"[Canvas] Objekt bereits vorhanden an Grid ({grid_x}, {grid_y}) im Layer {self.current_layer}")
-                return
+        # Prüfen ob bereits ein Objekt an dieser Grid-Position im aktuellen Layer existiert
+        grid_cell_x = x // self.grid_size
+        grid_cell_y = y // self.grid_size
+        if not self._is_grid_position_free_in_layer(grid_cell_x, grid_cell_y, self.current_layer):
+            # Objekt existiert bereits an dieser Position im selben Layer
+            print(f"[Canvas] Objekt bereits vorhanden an Grid ({grid_cell_x}, {grid_cell_y}) im Layer {self.current_layer}")
+            return
         
         self.objects.append(new_obj)
         
@@ -2028,36 +2037,13 @@ class SceneCanvas(QWidget):
         # Original-Objekte-IDs sammeln (einmalig, außerhalb der Schleife)
         original_obj_ids = {preview_data["original"].get("id") for preview_data in self._duplicate_preview_objects}
         
-        # Hilfsfunktion: Prüft ob eine Grid-Position frei ist
+        # Hilfsfunktion: Prüft ob eine Grid-Position frei ist (im aktuellen Layer)
         def is_position_free(grid_cell_x: int, grid_cell_y: int, exclude_new_objects: list = None) -> bool:
             """Prüft ob eine Grid-Position frei ist"""
-            if exclude_new_objects is None:
-                exclude_new_objects = []
-            
-            # Prüfe gegen bestehende Objekte (aber ignoriere Original-Objekte, die gerade dupliziert werden)
-            for other_obj in self.objects:
-                other_id = other_obj.get("id")
-                # Ignoriere Original-Objekte, die gerade dupliziert werden
-                if other_id in original_obj_ids:
-                    continue
-                    
-                other_x = other_obj.get("x", 0)
-                other_y = other_obj.get("y", 0)
-                other_grid_x = other_x // self.grid_size
-                other_grid_y = other_y // self.grid_size
-                if other_grid_x == grid_cell_x and other_grid_y == grid_cell_y:
-                    return False
-            
-            # Prüfe auch gegen bereits in dieser Runde hinzugefügte Objekte
-            for already_added in exclude_new_objects:
-                other_x = already_added.get("x", 0)
-                other_y = already_added.get("y", 0)
-                other_grid_x = other_x // self.grid_size
-                other_grid_y = other_y // self.grid_size
-                if other_grid_x == grid_cell_x and other_grid_y == grid_cell_y:
-                    return False
-            
-            return True
+            return self._is_grid_position_free_in_layer(
+                grid_cell_x, grid_cell_y, self.current_layer,
+                exclude_obj_ids=original_obj_ids, exclude_new_objects=exclude_new_objects
+            )
         
         # WICHTIG: Sammle bereits generierte IDs, damit keine doppelten IDs erstellt werden
         generated_ids = set()  # IDs die bereits für neue Objekte generiert wurden
