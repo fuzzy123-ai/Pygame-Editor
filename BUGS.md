@@ -133,4 +133,73 @@ Strings (Text in Anführungszeichen) und Kommentare flackern im Code-Editor. Sie
 - Debug-Logging implementieren, um den genauen Ablauf zu verstehen
 - Prüfen, ob LSP-Updates das Highlighting überschreiben
 - Prüfen, ob `apply_diagnostics()` die Formatierung zurücksetzt
+
+---
+
+## Bug #8: Block-Vorschau beim Sprite-Platzieren ist verschoben
+
+**Status:** Offen  
+**Priorität:** Mittel  
+**Datum:** 2024
+
+### Beschreibung
+Bei der Block-Vorschau (z.B. beim Sprite-Platzieren) ist die Vorschau verschoben. Nach dem Klicken soll die Vorschau auf die Maus zentriert werden.
+
+### Symptome
+- Die Vorschau-Box erscheint nicht an der Maus-Position
+- Die Vorschau ist versetzt zur tatsächlichen Maus-Position
+- Nach dem Klick wird das Objekt nicht an der erwarteten Position platziert
+
+### Technische Details
+- Datei: `game_editor/ui/scene_canvas.py`
+- Betroffene Funktionen: Sprite-Platzierung, Duplicate-Preview, Paste-Preview
+- Problem: Vorschau-Offset-Berechnung ist nicht korrekt auf Maus-Position zentriert
+
+### Lösung
+Die Vorschau sollte nach dem Klicken auf die Maus zentriert werden. Die Offset-Berechnung muss angepasst werden, damit die Vorschau-Box genau an der Maus-Position erscheint.
+
+---
+
+## Bug #9: Strg+V (Paste) - Vorschau erscheint, aber Objekte werden beim Klicken nicht platziert
+
+**Status:** Offen  
+**Priorität:** Hoch  
+**Datum:** 2024
+
+### Beschreibung
+Beim Drücken von Strg+V (Paste) erscheint die Vorschau der kopierten Objekte korrekt, aber beim Klicken auf den Canvas werden die Objekte nicht tatsächlich in die Szene platziert. Die Vorschau verschwindet, aber die Objekte werden nicht hinzugefügt.
+
+### Symptome
+- Strg+V zeigt die Vorschau der kopierten Objekte korrekt an
+- Die Vorschau folgt der Maus-Bewegung
+- Beim Klicken auf den Canvas passiert nichts - Objekte werden nicht platziert
+- Die Vorschau verschwindet möglicherweise, aber Objekte erscheinen nicht in der Szene
+
+### Vergleich mit Duplizieren-Funktion
+Die Paste-Funktion sollte ähnlich wie die Duplizieren-Funktion funktionieren:
+- Beide zeigen eine Vorschau der Objekte
+- Beide sollten beim Klicken die Objekte tatsächlich platzieren
+- Die Duplizieren-Funktion funktioniert korrekt, Paste-Funktion nicht
+
+### Technische Details
+- Datei: `game_editor/ui/scene_canvas.py`
+- Methoden: 
+  - `_start_paste_preview()` - Startet Paste-Vorschau (funktioniert)
+  - `_place_paste_preview()` - Sollte Objekte platzieren (funktioniert möglicherweise nicht)
+  - `mousePressEvent()` im Canvas - Ruft `_place_paste_preview()` auf
+- Vergleich: `_place_duplicate_preview()` funktioniert korrekt
+
+### Mögliche Ursachen
+- `_place_paste_preview()` wird möglicherweise nicht korrekt aufgerufen
+- Objekte werden erstellt, aber nicht zur `self.objects` Liste hinzugefügt
+- Undo/Redo-Command wird möglicherweise nicht korrekt erstellt
+- Fehler in der Position-Berechnung verhindert Platzierung
+- Objekte werden erstellt, aber Canvas wird nicht aktualisiert
+
+### Nächste Schritte
+- Debug-Logging in `_place_paste_preview()` hinzufügen
+- Prüfen ob Methode überhaupt aufgerufen wird
+- Vergleich mit `_place_duplicate_preview()` - was ist anders?
+- Prüfen ob Objekte zur Liste hinzugefügt werden
+- Prüfen ob `save_scene()` aufgerufen wird
   

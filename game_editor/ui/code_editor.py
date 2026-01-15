@@ -3,7 +3,7 @@ Code Editor - Python Editor mit QTextEdit, LSP und Auto-Completion
 """
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QHBoxLayout, QPushButton,
                                QDialog, QScrollArea, QToolButton, QTextEdit, QMenu, QCompleter,
-                               QSplitter, QListWidgetItem)
+                               QListWidgetItem)
 from PySide6.QtCore import Qt, QTimer, Signal, Slot, QPoint, QStringListModel
 from typing import Optional
 from PySide6.QtGui import (QIcon, QPainter, QColor, QPolygon, QFont, QContextMenuEvent, QAction,
@@ -11,12 +11,10 @@ from PySide6.QtGui import (QIcon, QPainter, QColor, QPolygon, QFont, QContextMen
 from pathlib import Path
 import sys
 import urllib.parse
-from datetime import datetime
 
 # LSP-Module importieren
 from .lsp_client import LSPClient
 from .syntax_highlighter import LSPSyntaxHighlighter
-from .diagnostics_widget import DiagnosticsWidget
 
 # Editor-Import: Nur QTextEdit (kein QScintilla mehr)
 # WICHTIG: Nur eine Binding-Ebene (PySide6) - keine PyQt5/PyQt6
@@ -230,10 +228,8 @@ class CodeEditor(QWidget):
         self.current_object_id: str | None = None  # ID des aktuell ausgewählten Objekts
         self.undo_redo_manager = None  # Wird vom main_window gesetzt
         self.scene_canvas = None  # Wird vom main_window gesetzt (für Objekt-Updates)
-        self.console = None  # Wird vom main_window gesetzt (für Debug-Ausgaben)
         self.last_text = ""  # Letzter Text für Undo/Redo
         self.last_syntax_text = ""  # Letzter Text für Syntax-Highlighting-Check
-        self.debug_syntax = True  # Debug-Ausgaben für Syntax-Highlighting (kann später deaktiviert werden)
         self.text_change_timer = QTimer()
         self.text_change_timer.setSingleShot(True)
         self.text_change_timer.timeout.connect(self._on_text_changed_delayed)
@@ -306,6 +302,7 @@ class CodeEditor(QWidget):
         """)
         # Grünes Dreieck-Icon erstellen
         self._create_play_icon()
+        self.run_button.setToolTip("Spiel starten (F5)")
         self.run_button.clicked.connect(self.run_requested.emit)
         self.run_button.setEnabled(False)
         self.toolbar_layout.addWidget(self.run_button)
@@ -335,6 +332,7 @@ class CodeEditor(QWidget):
                 color: #757575;
             }
         """)
+        self.stop_button.setToolTip("Spiel stoppen (F6)")
         self.stop_button.clicked.connect(self.stop_requested.emit)
         self.stop_button.setEnabled(False)
         self.toolbar_layout.addWidget(self.stop_button)
@@ -394,9 +392,6 @@ class CodeEditor(QWidget):
         # Hilfe-Overlay (wird später erstellt wenn benötigt)
         self.help_overlay = None
         
-        # Splitter für Editor + Diagnostics
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        
         # Code Editor: QTextEdit mit LSP-Unterstützung
         self.editor = CustomTextEdit()
         self.editor.parent_code_editor = self  # Referenz für Einstellungen
@@ -427,21 +422,11 @@ class CodeEditor(QWidget):
         # Syntax-Highlighting bei Textänderung
         self.editor.textChanged.connect(self._on_text_changed_for_syntax)
         
-        # Diagnostics Widget
-        self.diagnostics_widget = DiagnosticsWidget()
-        self.diagnostics_widget.setMaximumHeight(150)  # Begrenzte Höhe
-        
-        # Splitter konfigurieren
-        splitter.addWidget(self.editor)
-        splitter.addWidget(self.diagnostics_widget)
-        splitter.setSizes([800, 200])  # Editor größer, Diagnostics kleiner
-        splitter.setCollapsible(0, False)  # Editor nicht zusammenklappbar
-        splitter.setCollapsible(1, True)   # Diagnostics zusammenklappbar
-        
         # Lexer auf None setzen (wird nicht mehr verwendet)
         self.lexer = None
         
-        layout.addWidget(splitter)
+        # Editor direkt zum Layout hinzufügen (nutzt gesamten verfügbaren Platz)
+        layout.addWidget(self.editor)
         self.setLayout(layout)
         
         # LSP-Client wird später initialisiert (wenn Projekt geladen wird)
@@ -1291,24 +1276,13 @@ def update():
         """Wird aufgerufen wenn Text geändert wird (für Syntax-Highlighting)"""
         # WICHTIG: Verhindere Endlosschleife - wenn Highlighting bereits läuft, nicht erneut starten
         if self._updating_syntax:
-            if self.debug_syntax and self.console:
-                timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]
-                self.console.append_output(f"[{timestamp}] [SYNTAX] _on_text_changed_for_syntax: ÜBERSPRUNGEN (_updating_syntax=True)")
             return
         
         # Prüfe ob Text sich tatsächlich geändert hat (textChanged wird auch bei Format-Änderungen getriggert!)
         current_text = self.editor.toPlainText() if hasattr(self.editor, 'toPlainText') else ""
         if current_text == self.last_syntax_text:
             # Text hat sich nicht geändert - überspringen (verhindert Flackern)
-            if self.debug_syntax and self.console:
-                timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]
-                self.console.append_output(f"[{timestamp}] [SYNTAX] _on_text_changed_for_syntax: ÜBERSPRUNGEN (Text unverändert, {len(current_text)} Zeichen)")
             return
-        
-        # Debug-Ausgabe
-        if self.debug_syntax and self.console:
-            timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]
-            self.console.append_output(f"[{timestamp}] [SYNTAX] _on_text_changed_for_syntax: Timer gestartet (Text geändert: {len(self.last_syntax_text)} -> {len(current_text)} Zeichen)")
         
         # Text als "letzten" Text speichern
         self.last_syntax_text = current_text
@@ -1320,15 +1294,7 @@ def update():
     def _apply_syntax_highlighting(self):
         """Wendet Syntax-Highlighting an (wird nach Debouncing aufgerufen)"""
         if self._updating_syntax:
-            if self.debug_syntax and self.console:
-                timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]
-                self.console.append_output(f"[{timestamp}] [SYNTAX] _apply_syntax_highlighting: ÜBERSPRUNGEN (_updating_syntax=True)")
             return
-        
-        # Debug-Ausgabe
-        if self.debug_syntax and self.console:
-            timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]
-            self.console.append_output(f"[{timestamp}] [SYNTAX] _apply_syntax_highlighting: START")
         
         self._updating_syntax = True
         
@@ -1344,11 +1310,6 @@ def update():
             else:
                 text = self.editor.toPlainText()
             
-            # Debug-Ausgabe: Text-Länge
-            if self.debug_syntax and self.console:
-                timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]
-                self.console.append_output(f"[{timestamp}] [SYNTAX] Text geholt: {len(text)} Zeichen")
-            
             # Syntax-Highlighting anwenden (einfache Regex-Version)
             if hasattr(self.editor, 'apply_syntax_highlighting'):
                 self.editor.apply_syntax_highlighting(text)
@@ -1361,11 +1322,6 @@ def update():
                 self.editor.blockSignals(editor_signals_blocked)
             
             self._updating_syntax = False
-            
-            # Debug-Ausgabe: Ende
-            if self.debug_syntax and self.console:
-                timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]
-                self.console.append_output(f"[{timestamp}] [SYNTAX] _apply_syntax_highlighting: ENDE")
     
     def _trigger_lsp_completion(self):
         """Triggert LSP-Auto-Vervollständigung"""
@@ -1423,10 +1379,6 @@ def update():
         
         # Nur Diagnostics für aktuelles Document anzeigen
         if uri == self.lsp_document_uri:
-            # Diagnostics im Widget anzeigen
-            if self.diagnostics_widget:
-                self.diagnostics_widget.update_diagnostics(diagnostics, uri)
-            
             # Unterstreichungen im Editor anwenden
             if hasattr(self.editor, 'apply_diagnostics'):
                 self.editor.apply_diagnostics(diagnostics)

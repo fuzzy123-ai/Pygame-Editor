@@ -4,7 +4,7 @@ Scene Canvas - 2D Canvas für Objekte mit Drag & Drop, Zoom, Game Preview
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QHBoxLayout, 
                                 QPushButton, QSlider, QComboBox, QMenu, QInputDialog)
 from PySide6.QtCore import Qt, Signal, QPoint, QRect, QTimer, QMimeData
-from PySide6.QtGui import QPainter, QPaintEvent, QColor, QPen, QBrush, QPixmap, QImage, QWheelEvent, QContextMenuEvent, QDrag
+from PySide6.QtGui import QPainter, QPaintEvent, QColor, QPen, QBrush, QPixmap, QImage, QWheelEvent, QContextMenuEvent, QDrag, QShortcut, QKeySequence, QCursor
 from pathlib import Path
 import json
 from typing import Optional, Dict, Any, List
@@ -32,6 +32,13 @@ class SceneCanvas(QWidget):
         self._duplicate_preview_objects = []  # Liste der Vorschau-Objekte (Dicts)
         self._duplicate_preview_offset = QPoint(0, 0)  # Offset für Vorschau-Position
         self._duplicate_preview_mouse_start = QPoint(0, 0)  # Maus-Position beim Start des Duplizierens
+        
+        # Clipboard-System für Copy/Paste
+        self._clipboard_objects = []  # Liste der kopierten Objekte (als Dicts)
+        self._paste_preview_mode = False  # Flag für Paste-Vorschau
+        self._paste_preview_objects = []  # Liste der Paste-Vorschau-Objekte
+        self._paste_preview_offset = QPoint(0, 0)  # Offset für Paste-Position
+        self._paste_preview_mouse_start = QPoint(0, 0)  # Maus-Position beim Start des Paste
         
         # Zoom
         self.zoom_factor = 1.0
@@ -251,6 +258,389 @@ class SceneCanvas(QWidget):
         self.canvas.mouse_pressed.connect(self._on_mouse_pressed)
         self.canvas.mouse_moved.connect(self._on_mouse_moved)
         self.canvas.mouse_released.connect(self._on_mouse_released)
+        
+        # Keyboard Shortcuts einrichten
+        self._setup_keyboard_shortcuts()
+    
+    def _setup_keyboard_shortcuts(self):
+        """Richtet Keyboard-Shortcuts für Objekt-Operationen ein"""
+        # Copy (Strg+C)
+        copy_shortcut = QShortcut(QKeySequence("Ctrl+C"), self)
+        copy_shortcut.activated.connect(self._copy_selected_objects)
+        
+        # Paste (Strg+V)
+        paste_shortcut = QShortcut(QKeySequence("Ctrl+V"), self)
+        paste_shortcut.activated.connect(self._start_paste_preview)
+        
+        # Cut (Strg+X)
+        cut_shortcut = QShortcut(QKeySequence("Ctrl+X"), self)
+        cut_shortcut.activated.connect(self._cut_selected_objects)
+        
+        # Delete (Entf/Backspace)
+        delete_shortcut = QShortcut(QKeySequence("Delete"), self)
+        delete_shortcut.activated.connect(self._delete_selected_objects)
+        backspace_shortcut = QShortcut(QKeySequence("Backspace"), self)
+        backspace_shortcut.activated.connect(self._delete_selected_objects)
+        
+        # Select All (Strg+A)
+        select_all_shortcut = QShortcut(QKeySequence("Ctrl+A"), self)
+        select_all_shortcut.activated.connect(self._select_all_objects)
+        
+        # Duplicate (Strg+D)
+        duplicate_shortcut = QShortcut(QKeySequence("Ctrl+D"), self)
+        duplicate_shortcut.activated.connect(self._duplicate_selected_objects)
+        
+        # Deselect (Esc)
+        deselect_shortcut = QShortcut(QKeySequence("Escape"), self)
+        deselect_shortcut.activated.connect(self._deselect_all_objects)
+    
+    def _copy_selected_objects(self):
+        """Kopiert die ausgewählten Objekte in die Zwischenablage"""
+        if not self.selected_object_ids:
+            return
+        
+        # Objekte kopieren (tiefe Kopie)
+        self._clipboard_objects = []
+        for obj_id in self.selected_object_ids:
+            obj = next((o for o in self.objects if o.get("id") == obj_id), None)
+            if obj:
+                obj_copy = obj.copy()
+                # ID entfernen (wird beim Einfügen neu generiert)
+                obj_copy.pop("id", None)
+                self._clipboard_objects.append(obj_copy)
+        
+        if self._clipboard_objects:
+            print(f"[Canvas] {len(self._clipboard_objects)} Objekt(e) kopiert")
+    
+    def _cut_selected_objects(self):
+        """Schneidet die ausgewählten Objekte aus (kopiert und löscht)"""
+        if not self.selected_object_ids:
+            return
+        
+        # Zuerst kopieren
+        self._copy_selected_objects()
+        
+        # Dann löschen
+        self._delete_selected_objects()
+    
+    def _delete_selected_objects(self):
+        """Löscht die ausgewählten Objekte"""
+        # Verwende die gleiche Methode wie beim Rechtsklick-Löschen
+        self._delete_objects_multiple(self.selected_object_ids)
+    
+    def _select_all_objects(self):
+        """Wählt alle Objekte im aktuellen Layer aus"""
+        # Alle Objekte im aktuellen Layer finden
+        objects_in_layer = [
+            obj for obj in self.objects
+            if obj.get("layer", "default") == self.current_layer
+        ]
+        
+        if not objects_in_layer:
+            return
+        
+        # Alle IDs sammeln
+        self.selected_object_ids = [obj.get("id") for obj in objects_in_layer if obj.get("id")]
+        self.selected_object_id = self.selected_object_ids[0] if self.selected_object_ids else None
+        
+        # Signal senden (erstes Objekt)
+        if self.selected_object_id:
+            first_obj = next((o for o in self.objects if o.get("id") == self.selected_object_id), None)
+            if first_obj:
+                self.object_selected.emit(first_obj)
+        
+        self.canvas.update()
+        print(f"[Canvas] {len(self.selected_object_ids)} Objekt(e) ausgewählt")
+    
+    def _duplicate_selected_objects(self):
+        """Dupliziert die ausgewählten Objekte (verwendet Duplicate-Preview-System)"""
+        if not self.selected_object_ids:
+            return
+        
+        # Verwende bestehendes Duplicate-Preview-System
+        # Berechne Maus-Position (Mitte der ausgewählten Objekte)
+        total_x = 0
+        total_y = 0
+        count = 0
+        
+        for obj_id in self.selected_object_ids:
+            obj = next((o for o in self.objects if o.get("id") == obj_id), None)
+            if obj:
+                obj_layer = obj.get("layer", "default")
+                if obj_layer == self.current_layer:
+                    obj_x = obj.get("x", 0)
+                    obj_y = obj.get("y", 0)
+                    obj_width = obj.get("width", self.grid_size)
+                    obj_height = obj.get("height", self.grid_size)
+                    center_x = obj_x + obj_width / 2
+                    center_y = obj_y + obj_height / 2
+                    total_x += center_x
+                    total_y += center_y
+                    count += 1
+        
+        if count > 0:
+            mouse_world_pos = QPoint(int(total_x / count), int(total_y / count))
+            self._start_duplicate_preview(self.selected_object_ids, mouse_world_pos)
+    
+    def _deselect_all_objects(self):
+        """Hebt die Auswahl aller Objekte auf"""
+        # Paste-Preview abbrechen falls aktiv
+        if self._paste_preview_mode:
+            self._cancel_paste_preview()
+            return  # Esc während Paste-Preview bricht nur die Vorschau ab, nicht die Auswahl
+        
+        # Duplicate-Preview abbrechen falls aktiv
+        if self._duplicate_preview_mode:
+            self._cancel_duplicate_preview()
+            return  # Esc während Duplicate-Preview bricht nur die Vorschau ab, nicht die Auswahl
+        
+        # Auswahl zurücksetzen
+        self.selected_object_ids = []
+        old_selected_id = self.selected_object_id
+        self.selected_object_id = None
+        
+        # Nur Signal senden wenn wirklich eine Auswahl vorhanden war
+        if old_selected_id:
+            self.object_selected.emit({})
+        
+        self.canvas.update()
+    
+    def _start_paste_preview(self):
+        """Startet den Paste-Vorschau-Modus"""
+        if not self._clipboard_objects:
+            return
+        
+        # Original-Objekte kopieren für Vorschau
+        self._paste_preview_objects = []
+        
+        # Berechne die erste Objekt-Position (als Referenz)
+        first_obj = self._clipboard_objects[0]
+        first_obj_x = first_obj.get("x", 0)
+        first_obj_y = first_obj.get("y", 0)
+        
+        # Aktuelle Maus-Position vom Canvas abrufen
+        cursor_pos = self.canvas.mapFromGlobal(QCursor.pos())
+        adjusted_pos = cursor_pos - self.view_offset
+        zoom = self.zoom_factor
+        world_x = int(adjusted_pos.x() / zoom)
+        world_y = int(adjusted_pos.y() / zoom)
+        
+        # Maus-Position an Grid ausrichten (Grid-Feld finden)
+        grid_size = self.grid_size
+        grid_mouse_x = (world_x // grid_size) * grid_size
+        grid_mouse_y = (world_y // grid_size) * grid_size
+        
+        # Offset berechnen: Grid-Feld-Position - erste Objekt-Position
+        # Das verschiebt die Objekte so, dass das erste Objekt im Grid-Feld unter der Maus liegt
+        dx = grid_mouse_x - first_obj_x
+        dy = grid_mouse_y - first_obj_y
+        self._paste_preview_offset = QPoint(int(dx), int(dy))
+        self._paste_preview_mouse_start = QPoint(world_x, world_y)
+        
+        # Objekte für Vorschau vorbereiten
+        for obj_copy in self._clipboard_objects:
+            self._paste_preview_objects.append({
+                "copy": obj_copy.copy(),
+                "start_pos": QPoint(obj_copy.get("x", 0), obj_copy.get("y", 0))
+            })
+        
+        self._paste_preview_mode = True
+        self.canvas.setCursor(Qt.CursorShape.CrossCursor)
+        self.canvas.update()
+    
+    def _cancel_paste_preview(self):
+        """Bricht die Paste-Vorschau ab"""
+        self._paste_preview_mode = False
+        self._paste_preview_objects = []
+        self._paste_preview_offset = QPoint(0, 0)
+        self.canvas.setCursor(Qt.CursorShape.ArrowCursor)
+        self.canvas.update()
+    
+    def _cancel_duplicate_preview(self):
+        """Bricht die Duplicate-Vorschau ab"""
+        self._duplicate_preview_mode = False
+        self._duplicate_preview_objects = []
+        self._duplicate_preview_offset = QPoint(0, 0)
+        self.canvas.setCursor(Qt.CursorShape.ArrowCursor)
+        self.canvas.update()
+    
+    def _place_paste_preview(self):
+        """Platziert die Paste-Vorschau-Objekte tatsächlich in der Szene"""
+        if not self._paste_preview_mode or not self._paste_preview_objects:
+            return
+        
+        new_objects = []
+        generated_ids = set()
+        
+        # Hilfsfunktion: Prüft ob eine Grid-Position frei ist
+        def is_position_free(grid_cell_x: int, grid_cell_y: int, exclude_new_objects: list = None) -> bool:
+            if exclude_new_objects is None:
+                exclude_new_objects = []
+            
+            for other_obj in self.objects:
+                other_x = other_obj.get("x", 0)
+                other_y = other_obj.get("y", 0)
+                other_grid_x = other_x // self.grid_size
+                other_grid_y = other_y // self.grid_size
+                if other_grid_x == grid_cell_x and other_grid_y == grid_cell_y:
+                    return False
+            
+            for already_added in exclude_new_objects:
+                other_x = already_added.get("x", 0)
+                other_y = already_added.get("y", 0)
+                other_grid_x = other_x // self.grid_size
+                other_grid_y = other_y // self.grid_size
+                if other_grid_x == grid_cell_x and other_grid_y == grid_cell_y:
+                    return False
+            
+            return True
+        
+        # Position-Usage für automatische Verschiebung
+        position_usage = {}
+        
+        for preview_data in self._paste_preview_objects:
+            obj_copy = preview_data["copy"]
+            start_pos = preview_data["start_pos"]
+            offset = self._paste_preview_offset
+            
+            new_x = start_pos.x() + offset.x()
+            new_y = start_pos.y() + offset.y()
+            
+            grid_x = (new_x // self.grid_size) * self.grid_size
+            grid_y = (new_y // self.grid_size) * self.grid_size
+            grid_x = int(grid_x)
+            grid_y = int(grid_y)
+            
+            grid_cell_x = grid_x // self.grid_size
+            grid_cell_y = grid_y // self.grid_size
+            
+            pos_key = (grid_cell_x, grid_cell_y)
+            position_usage[pos_key] = position_usage.get(pos_key, 0) + 1
+        
+        # Jetzt platziere alle Objekte
+        position_offsets = {}
+        
+        for preview_data in self._paste_preview_objects:
+            obj_copy = preview_data["copy"]
+            start_pos = preview_data["start_pos"]
+            offset = self._paste_preview_offset
+            
+            # Neue Position berechnen
+            new_x = start_pos.x() + offset.x()
+            new_y = start_pos.y() + offset.y()
+            
+            # An Grid ausrichten
+            grid_x = (new_x // self.grid_size) * self.grid_size
+            grid_y = (new_y // self.grid_size) * self.grid_size
+            grid_x = int(grid_x)
+            grid_y = int(grid_y)
+            
+            grid_cell_x = grid_x // self.grid_size
+            grid_cell_y = grid_y // self.grid_size
+            
+            # Prüfen ob Position frei ist (gegen bestehende Objekte)
+            position_free = is_position_free(grid_cell_x, grid_cell_y, new_objects)
+            
+            # Wenn mehrere Objekte an der gleichen Position landen würden, verschiebe sie
+            pos_key = (grid_cell_x, grid_cell_y)
+            if pos_key in position_offsets:
+                # Diese Position wurde bereits für ein anderes Objekt verwendet
+                # Finde eine freie Position in der Nähe
+                position_free = False
+            else:
+                # Erste Verwendung dieser Position - speichere den Offset-Index
+                position_offsets[pos_key] = 0
+            
+            # Wenn Position belegt ist, versuche nächste freie Position zu finden
+            if not position_free:
+                found_free = False
+                search_radius = 1
+                max_radius = 10
+                
+                while not found_free and search_radius <= max_radius:
+                    # Spiral-Suche: Starte oben, dann im Uhrzeigersinn
+                    search_pattern = []
+                    for r in range(1, search_radius + 1):
+                        # Oben
+                        search_pattern.append((0, -r))
+                        # Rechts
+                        search_pattern.append((r, 0))
+                        # Unten
+                        search_pattern.append((0, r))
+                        # Links
+                        search_pattern.append((-r, 0))
+                        # Diagonalen
+                        if r > 1:
+                            search_pattern.append((r-1, -r+1))
+                            search_pattern.append((r-1, r-1))
+                            search_pattern.append((-r+1, r-1))
+                            search_pattern.append((-r+1, -r+1))
+                    
+                    for dx, dy in search_pattern:
+                        test_cell_x = grid_cell_x + dx
+                        test_cell_y = grid_cell_y + dy
+                        if is_position_free(test_cell_x, test_cell_y, new_objects):
+                            grid_cell_x = test_cell_x
+                            grid_cell_y = test_cell_y
+                            grid_x = test_cell_x * self.grid_size
+                            grid_y = test_cell_y * self.grid_size
+                            found_free = True
+                            break
+                    
+                    search_radius += 1
+                
+                # Wenn immer noch keine freie Position gefunden, überspringe dieses Objekt
+                if not found_free:
+                    continue
+            
+            # Neues Objekt erstellen
+            new_obj = obj_copy.copy()
+            # Eindeutige ID generieren (berücksichtige bereits generierte IDs)
+            existing_ids = {obj.get("id") for obj in self.objects if obj.get("id")}
+            existing_ids.update(generated_ids)
+            
+            # Finde die erste verfügbare Nummer, beginnend bei 1
+            num = 1
+            while True:
+                obj_id = f"object_{num}"
+                if obj_id not in existing_ids:
+                    break
+                num += 1
+            
+            new_obj["id"] = obj_id
+            generated_ids.add(obj_id)
+            
+            # Namen aktualisieren
+            base_name = new_obj.get("name", "")
+            if not base_name or not base_name.strip():
+                base_name = new_obj.get("id", "object")
+            new_obj["name"] = self._generate_unique_name(base_name)
+            new_obj["x"] = grid_x
+            new_obj["y"] = grid_y
+            new_obj["layer"] = self.current_layer
+            
+            new_objects.append(new_obj)
+        
+        # Objekte hinzufügen mit Undo/Redo (alle auf einmal)
+        if new_objects and self.undo_redo_manager:
+            from ..utils.commands import ObjectAddMultipleCommand
+            command = ObjectAddMultipleCommand(
+                self.objects,
+                new_objects,
+                lambda: (self.canvas.update(), self.save_scene())
+            )
+            self.undo_redo_manager.execute_command(command)
+            self.undo_redo_changed.emit()
+            
+            # Auswahl auf neue Objekte setzen
+            new_ids = [obj.get("id") for obj in new_objects]
+            self.selected_object_ids = new_ids
+            self.selected_object_id = new_ids[0] if new_ids else None
+            if new_objects:
+                self.object_selected.emit(new_objects[0])
+        
+        # Vorschau-Modus beenden
+        self._cancel_paste_preview()
     
     def load_project(self, project_path: Path):
         """Lädt Projekt und Szene"""
@@ -1468,6 +1858,10 @@ class SceneCanvas(QWidget):
         
         self.undo_redo_changed.emit()
         
+        # Paste-Preview abbrechen falls aktiv
+        if self._paste_preview_mode:
+            self._cancel_paste_preview()
+        
         # Auswahl zurücksetzen wenn gelöschte Objekte ausgewählt waren
         for obj_id in obj_ids:
             if obj_id in self.selected_object_ids:
@@ -1855,11 +2249,25 @@ class CanvasWidget(QWidget):
             self.parent_canvas.pan_start_pos = event.position().toPoint()
             return
         
+        # Rechte Maustaste: Vorschau abbrechen
+        if event.button() == Qt.RightButton:
+            if self.parent_canvas._paste_preview_mode:
+                self.parent_canvas._cancel_paste_preview()
+                return
+            if self.parent_canvas._duplicate_preview_mode:
+                self.parent_canvas._cancel_duplicate_preview()
+                return
+        
         # Linke Maustaste
         if event.button() == Qt.LeftButton:
             # Wenn Duplizieren-Vorschau aktiv ist, Objekte platzieren
             if self.parent_canvas._duplicate_preview_mode:
                 self.parent_canvas._place_duplicate_preview()
+                return
+            
+            # Wenn Paste-Vorschau aktiv ist, Objekte platzieren
+            if self.parent_canvas._paste_preview_mode:
+                self.parent_canvas._place_paste_preview()
                 return
             
             # Modifier-Tasten prüfen
@@ -2087,6 +2495,31 @@ class CanvasWidget(QWidget):
     
     def mouseMoveEvent(self, event):
         """Maus-Bewegung Event"""
+        # Paste-Vorschau aktualisieren
+        if self.parent_canvas._paste_preview_mode:
+            pos = event.position().toPoint()
+            adjusted_pos = pos - self.parent_canvas.view_offset
+            zoom = self.parent_canvas.zoom_factor
+            world_x = int(adjusted_pos.x() / zoom)
+            world_y = int(adjusted_pos.y() / zoom)
+            
+            # Maus-Position an Grid ausrichten (Grid-Feld finden)
+            if self.parent_canvas._paste_preview_objects:
+                grid_size = self.parent_canvas.grid_size
+                grid_mouse_x = (world_x // grid_size) * grid_size
+                grid_mouse_y = (world_y // grid_size) * grid_size
+                
+                # Erste Objekt-Position als Referenz verwenden
+                first_preview = self.parent_canvas._paste_preview_objects[0]
+                first_obj_x = first_preview["start_pos"].x()
+                first_obj_y = first_preview["start_pos"].y()
+                
+                # Offset berechnen: Grid-Feld-Position - erste Objekt-Position
+                dx = grid_mouse_x - first_obj_x
+                dy = grid_mouse_y - first_obj_y
+                self.parent_canvas._paste_preview_offset = QPoint(int(dx), int(dy))
+                self.update()
+        
         # Duplizieren-Vorschau aktualisieren
         if self.parent_canvas._duplicate_preview_mode:
             pos = event.position().toPoint()
@@ -2267,12 +2700,12 @@ class CanvasWidget(QWidget):
                         self._draw_selection(painter, obj)
                     break
         
-        # Duplizieren-Vorschau zeichnen
-        if self.parent_canvas._duplicate_preview_mode and self.parent_canvas._duplicate_preview_objects:
-            for preview_data in self.parent_canvas._duplicate_preview_objects:
+        # Paste-Vorschau zeichnen
+        if self.parent_canvas._paste_preview_mode and self.parent_canvas._paste_preview_objects:
+            for preview_data in self.parent_canvas._paste_preview_objects:
                 obj_copy = preview_data["copy"]
                 start_pos = preview_data["start_pos"]
-                offset = self.parent_canvas._duplicate_preview_offset
+                offset = self.parent_canvas._paste_preview_offset
                 
                 # Neue Position berechnen
                 new_x = start_pos.x() + offset.x()

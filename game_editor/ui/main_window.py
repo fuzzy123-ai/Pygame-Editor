@@ -10,7 +10,7 @@ import sys
 import os
 import shutil
 from .game_output_reader import GameOutputReader
-from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent
+from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QShortcut, QKeySequence
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -118,6 +118,9 @@ class EditorMainWindow(QMainWindow):
         self._create_status_bar()
         self._create_central_widget()
         
+        # Keyboard Shortcuts für Spiel-Steuerung einrichten
+        self._setup_game_shortcuts()
+        
         # Zuletzt geöffnetes Projekt laden
         QTimer.singleShot(100, self._load_last_project)
         
@@ -189,6 +192,16 @@ class EditorMainWindow(QMainWindow):
         
         # Ansicht-Menü
         view_menu = menubar.addMenu("&Ansicht")
+    
+    def _setup_game_shortcuts(self):
+        """Richtet Keyboard-Shortcuts für Spiel-Steuerung ein"""
+        # F5: Spiel starten
+        start_shortcut = QShortcut(QKeySequence("F5"), self)
+        start_shortcut.activated.connect(self._run_game)
+        
+        # F6: Spiel stoppen
+        stop_shortcut = QShortcut(QKeySequence("F6"), self)
+        stop_shortcut.activated.connect(self._stop_game)
     
     def _create_toolbar(self):
         """Erstellt die Toolbar mit Undo/Redo Buttons rechtsbündig"""
@@ -278,14 +291,14 @@ class EditorMainWindow(QMainWindow):
         
         # Run-Button und Stop-Button (werden im Code-Editor verwendet)
         self.run_button = QPushButton("▶")
-        self.run_button.setToolTip("Spiel starten")
+        self.run_button.setToolTip("Spiel starten (F5)")
         self.run_button.setFixedSize(30, 30)
         self.run_button.setVisible(False)  # Nicht sichtbar in Toolbar
         self.run_button.clicked.connect(self._run_game)
         self.run_button.setEnabled(False)
         
         self.stop_button = QPushButton("■")
-        self.stop_button.setToolTip("Spiel stoppen")
+        self.stop_button.setToolTip("Spiel stoppen (F6)")
         self.stop_button.setFixedSize(30, 30)
         self.stop_button.setVisible(False)  # Nicht sichtbar in Toolbar
         self.stop_button.clicked.connect(self._stop_game)
