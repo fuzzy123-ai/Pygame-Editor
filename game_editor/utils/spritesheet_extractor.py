@@ -16,6 +16,8 @@ except ImportError:
     except ImportError:
         HAS_QT = False
 
+from .image_fixer import fix_iccp_profile
+
 
 class SpritesheetExtractor:
     """Extrahiert einzelne Sprites aus Spritesheets"""
@@ -112,6 +114,9 @@ class SpritesheetExtractor:
                             output_path = output_dir / output_name
                             sprite.save(output_path, "PNG")
                             
+                            # iCCP-Profil-Korrektur für PNG-Bilder
+                            fix_iccp_profile(output_path, backup=False)
+                            
                         elif HAS_QT:
                             # Sprite extrahieren
                             sprite_pixmap = pixmap.copy(x, y, sprite_width, sprite_height)
@@ -127,6 +132,9 @@ class SpritesheetExtractor:
                             if not sprite_pixmap.save(str(output_path), "PNG"):
                                 errors.append(f"Konnte Sprite nicht speichern: {output_name}")
                                 continue
+                            
+                            # iCCP-Profil-Korrektur für PNG-Bilder
+                            fix_iccp_profile(output_path, backup=False)
                         
                         extracted_count += 1
                         sprite_index += 1
@@ -192,10 +200,16 @@ class SpritesheetExtractor:
                         sprite = img.crop((x, y, x + width, y + height))
                         output_path = output_dir / f"{name}.png"
                         sprite.save(output_path, "PNG")
+                        
+                        # iCCP-Profil-Korrektur für PNG-Bilder
+                        fix_iccp_profile(output_path, backup=False)
                     elif HAS_QT:
                         sprite_pixmap = pixmap.copy(x, y, width, height)
                         output_path = output_dir / f"{name}.png"
                         sprite_pixmap.save(str(output_path), "PNG")
+                        
+                        # iCCP-Profil-Korrektur für PNG-Bilder
+                        fix_iccp_profile(output_path, backup=False)
                     
                     extracted_count += 1
                     

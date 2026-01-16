@@ -27,9 +27,13 @@ except Exception as e:
 print("\n2. Testing QScintilla...")
 try:
     from PySide6.Qsci import QsciScintilla
-    print("   [OK] QScintilla available")
+    print("   [OK] QScintilla available (PySide6)")
 except ImportError:
-    print("   [WARN] QScintilla not available (using fallback)")
+    try:
+        from PyQt6.Qsci import QsciScintilla
+        print("   [OK] QScintilla available (PyQt6 - Fallback)")
+    except ImportError:
+        print("   [WARN] QScintilla not available (using fallback)")
 
 # Test 3: Pygame
 print("\n3. Testing Pygame...")

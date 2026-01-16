@@ -11,6 +11,7 @@ from PySide6.QtGui import (QIcon, QPainter, QColor, QPolygon, QFont, QContextMen
 from pathlib import Path
 import sys
 import urllib.parse
+import json
 
 # LSP-Module importieren
 from .lsp_client import LSPClient
@@ -227,7 +228,8 @@ class CodeEditor(QWidget):
         self.project_path: Path | None = None
         self.current_object_id: str | None = None  # ID des aktuell ausgewählten Objekts
         self.undo_redo_manager = None  # Wird vom main_window gesetzt
-        self.scene_canvas = None  # Wird vom main_window gesetzt (für Objekt-Updates)
+        self.scene_canvas = None
+        self.code_language: str = "deutsch"  # "deutsch" oder "englisch"  # Wird vom main_window gesetzt (für Objekt-Updates)
         self.last_text = ""  # Letzter Text für Undo/Redo
         self.last_syntax_text = ""  # Letzter Text für Syntax-Highlighting-Check
         self.text_change_timer = QTimer()
@@ -342,6 +344,37 @@ class CodeEditor(QWidget):
         self.redo_button = None  # Wird vom main_window gesetzt
         
         self.toolbar_layout.addStretch()
+        
+        # Sprachauswahl-Dropdown (Dark-Mode) - Nur Flaggen
+        from PySide6.QtWidgets import QComboBox
+        self.language_combo = QComboBox()
+        self.language_combo.addItem("DE", "deutsch")
+        self.language_combo.addItem("EN", "englisch")
+        self.language_combo.setCurrentIndex(0)  # Standard: Deutsch
+        self.language_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #2d2d2d;
+                color: #d4d4d4;
+                border: 2px solid #3a3a3a;
+                border-radius: 4px;
+                padding: 3px 8px;
+                min-width: 50px;
+            }
+            QComboBox:hover {
+                border-color: #4a9eff;
+            }
+            QComboBox::drop-down {
+                border: none;
+                background-color: #3a3a3a;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #2d2d2d;
+                color: #d4d4d4;
+                selection-background-color: #4a9eff;
+            }
+        """)
+        self.language_combo.currentIndexChanged.connect(self._on_language_changed)
+        self.toolbar_layout.addWidget(self.language_combo)
         
         # Label (wird dynamisch aktualisiert) - Dark-Mode
         self.label = QLabel("Code Editor (game.py)")
@@ -460,6 +493,9 @@ class CodeEditor(QWidget):
         self.project_path = project_path
         self.current_object_id = None
         
+        # Sprache laden (vor allem anderen)
+        self._load_language_setting()
+        
         # LSP-Client starten
         self._init_lsp_client()
         
@@ -552,6 +588,9 @@ class CodeEditor(QWidget):
                 # Syntax-Highlighting sofort anwenden (nach dem Laden)
                 QTimer.singleShot(100, lambda: self._apply_syntax_highlighting())
                 
+                # Sprache automatisch erkennen und Dropdown setzen
+                self._detect_and_set_language(code)
+                
             except Exception as e:
                 print(f"Fehler beim Laden von game.py: {e}")
         else:
@@ -559,15 +598,15 @@ class CodeEditor(QWidget):
             default_code = """# game.py - Dein Spiel-Code
 # Hier schreibst du die Logik für dein Spiel
 
-player = get_object("player")
+spieler = hole_objekt("player")
 
-def update():
+definiere aktualisiere():
     # Bewegung mit Pfeiltasten
-    if key_pressed("RIGHT"):
-        player.x += 4
+    wenn taste_gedrückt("RECHTS"):
+        spieler.x += 4
     
-    if key_pressed("LEFT"):
-        player.x -= 4
+    wenn taste_gedrückt("LINKS"):
+        spieler.x -= 4
 """
             if hasattr(self.editor, 'setText'):
                 self.editor.setText(default_code)
@@ -632,11 +671,11 @@ def update():
             code = f"""# Code für {object_id}
 # Hier schreibst du die Logik für dieses Objekt
 
-obj = get_object("{object_id}")
+objekt = hole_objekt("{object_id}")
 
-def update():
+definiere aktualisiere():
     # Deine Logik hier
-    pass
+    überspringen
 """
         
         # Signal temporär blockieren, damit beim Laden kein textChanged ausgelöst wird
@@ -659,8 +698,32 @@ def update():
         if hasattr(self.editor, 'syntax_highlighter') and self.editor.syntax_highlighter:
             self.editor.syntax_highlighter.reset_cache()
         
-        # Syntax-Highlighting sofort anwenden (nach dem Laden)
-        QTimer.singleShot(100, lambda: self._apply_syntax_highlighting())
+            # Syntax-Highlighting sofort anwenden (nach dem Laden)
+            QTimer.singleShot(100, lambda: self._apply_syntax_highlighting())
+            
+            # Sprache automatisch erkennen und Dropdown setzen
+            self._detect_and_set_language(code)
+    
+    def _detect_and_set_language(self, code: str):
+        """Erkennt die Sprache des Codes und setzt das Dropdown entsprechend"""
+        if not code or not code.strip():
+            return
+        
+        try:
+            from game_editor.engine.german_code_translator import detect_code_language
+            detected_language = detect_code_language(code)
+            
+            # Dropdown setzen (ohne Signal auszulösen, damit keine Übersetzung passiert)
+            if self.language_combo:
+                self.language_combo.blockSignals(True)
+                for i in range(self.language_combo.count()):
+                    if self.language_combo.itemData(i) == detected_language:
+                        self.language_combo.setCurrentIndex(i)
+                        self.code_language = detected_language
+                        break
+                self.language_combo.blockSignals(False)
+        except Exception:
+            pass  # Fehler ignorieren
     
     def _save_object_code(self, object_id: str):
         """Speichert Code für ein spezifisches Objekt in die Szene"""
@@ -672,6 +735,7 @@ def update():
             code = self.editor.text()
         else:
             code = self.editor.toPlainText()
+        
         
         # Szene laden und Code im Objekt speichern
         try:
@@ -806,9 +870,17 @@ def update():
         if self.help_overlay.isVisible():
             self.help_overlay.hide()
         else:
+            # Hilfe-Text aktualisieren (falls Sprache geändert wurde)
+            self._update_help_text()
             self.help_overlay.show()
             self.help_overlay.raise_()  # Fenster nach vorne bringen
             self.help_overlay.activateWindow()  # Fokus setzen
+    
+    def _update_help_text(self):
+        """Aktualisiert den Hilfe-Text basierend auf der aktuellen Sprache"""
+        if self.help_overlay is not None and hasattr(self, 'help_text_edit'):
+            help_text = self._generate_help_text()
+            self.help_text_edit.setHtml(help_text)
     
     def _create_help_overlay(self):
         """Erstellt das Hilfe-Fenster mit allen Pygame-Befehlen"""
@@ -892,18 +964,18 @@ def update():
         content_layout.setContentsMargins(10, 10, 10, 10)
         content_layout.setSpacing(0)  # Kein Spacing, damit TextEdit den gesamten Platz nutzt
         
-        # Hilfe-Text mit allen Befehlen
+        # Hilfe-Text mit allen Befehlen (basierend auf aktueller Sprache)
         help_text = self._generate_help_text()
         
         # QTextEdit statt QLabel für Textauswahl
-        help_text_edit = QTextEdit()
-        help_text_edit.setReadOnly(True)  # Read-only, aber Text auswählbar
-        help_text_edit.setTextInteractionFlags(
+        self.help_text_edit = QTextEdit()
+        self.help_text_edit.setReadOnly(True)  # Read-only, aber Text auswählbar
+        self.help_text_edit.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse | 
             Qt.TextInteractionFlag.TextSelectableByKeyboard
         )
-        help_text_edit.setHtml(help_text)
-        help_text_edit.setStyleSheet("""
+        self.help_text_edit.setHtml(help_text)
+        self.help_text_edit.setStyleSheet("""
             QTextEdit {
                 background-color: #1e1e1e;
                 color: #d4d4d4;
@@ -916,7 +988,7 @@ def update():
         """)
         
         # TextEdit soll den gesamten verfügbaren Platz nutzen
-        content_layout.addWidget(help_text_edit, stretch=1)  # stretch=1 für gesamten Platz
+        content_layout.addWidget(self.help_text_edit, stretch=1)  # stretch=1 für gesamten Platz
         
         content_widget.setLayout(content_layout)
         scroll_area.setWidget(content_widget)
@@ -926,39 +998,49 @@ def update():
         self.help_overlay.setLayout(dialog_layout)
     
     def _generate_help_text(self) -> str:
-        """Generiert den Hilfe-Text mit allen verfügbaren Befehlen"""
+        """Generiert den Hilfe-Text mit allen verfügbaren Befehlen (basierend auf aktueller Sprache)"""
+        # Aktuelle Sprache prüfen
+        language = getattr(self, 'code_language', 'deutsch')
+        
+        if language == "deutsch":
+            return self._generate_help_text_german()
+        else:
+            return self._generate_help_text_english()
+    
+    def _generate_help_text_german(self) -> str:
+        """Generiert den Hilfe-Text mit deutschen Befehlen"""
         help_html = """
         <h2 style="color: #4a9eff; margin-top: 0;">Objekt-Funktionen</h2>
         
-        <h3 style="color: #90caf9;">get_object(id)</h3>
+        <h3 style="color: #90caf9;">hole_objekt(id)</h3>
         <p>Gibt ein Objekt anhand seiner ID zurück.</p>
         <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
-player = get_object("player")</pre>
+spieler = hole_objekt("player")</pre>
         
-        <h3 style="color: #90caf9;">get_all_objects()</h3>
+        <h3 style="color: #90caf9;">hole_alle_objekte()</h3>
         <p>Gibt alle sichtbaren Objekte zurück.</p>
         <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
-all_objects = get_all_objects()</pre>
+alle_objekte = hole_alle_objekte()</pre>
         
         <h2 style="color: #4a9eff;">Input-Funktionen</h2>
         
-        <h3 style="color: #90caf9;">key_pressed(key)</h3>
+        <h3 style="color: #90caf9;">taste_gedrückt(taste)</h3>
         <p>Prüft ob eine Taste gedrückt gehalten wird.</p>
-        <p><b>Verfügbare Tasten:</b> "LEFT", "RIGHT", "UP", "DOWN", "SPACE", "ENTER", "W", "A", "S", "D", "F1"</p>
+        <p><b>Verfügbare Tasten:</b> "LINKS", "RECHTS", "HOCH", "RUNTER", "SPACE", "ENTER", "W", "A", "S", "D", "F1"</p>
         <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
-if key_pressed("RIGHT") or key_pressed("D"):
-    player.x += 4</pre>
+wenn taste_gedrückt("RECHTS") oder taste_gedrückt("D"):
+    spieler.x += 4</pre>
         
-        <h3 style="color: #90caf9;">key_down(key)</h3>
+        <h3 style="color: #90caf9;">taste_runter(taste)</h3>
         <p>Prüft ob eine Taste gerade gedrückt wurde (nur einmal beim Drücken).</p>
         <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
-if key_down("SPACE"):
-    print_debug("Springen!")</pre>
+wenn taste_runter("SPACE"):
+    drucke_debug("Springen!")</pre>
         
-        <h3 style="color: #90caf9;">mouse_position()</h3>
+        <h3 style="color: #90caf9;">maus_position()</h3>
         <p>Gibt die aktuelle Mausposition zurück (x, y).</p>
         <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
-mx, my = mouse_position()</pre>
+mx, my = maus_position()</pre>
         
         <h2 style="color: #4a9eff;">GameObject-Eigenschaften</h2>
         
@@ -969,53 +1051,239 @@ mx, my = mouse_position()</pre>
             <li><b>width, height</b> - Größe (float)</li>
             <li><b>visible</b> - Sichtbarkeit (bool)</li>
             <li><b>sprite</b> - Sprite-Pfad (string)</li>
-            <li><b>is_ground</b> - Boden-Tile (bool) - True wenn Objekt als Boden markiert ist</li>
+            <li><b>is_ground</b> - Boden-Tile (bool) - wahr wenn Objekt als Boden markiert ist</li>
         </ul>
         
         <h2 style="color: #4a9eff;">GameObject-Methoden</h2>
         
-        <h3 style="color: #90caf9;">collides_with(other_id)</h3>
+        <h3 style="color: #90caf9;">kollidiert_mit(andere_id)</h3>
         <p>Prüft ob dieses Objekt mit einem anderen kollidiert.</p>
         <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
-if player.collides_with("enemy1"):
-    print_debug("Kollision!")</pre>
+wenn spieler.kollidiert_mit("enemy1"):
+    drucke_debug("Kollision!")</pre>
         
-        <h3 style="color: #90caf9;">destroy()</h3>
+        <h3 style="color: #90caf9;">zerstöre()</h3>
         <p>Entfernt das Objekt aus dem Spiel.</p>
         <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
-enemy.destroy()</pre>
+feind.zerstöre()</pre>
+        
+        <h2 style="color: #4a9eff;">Bewegungs-Funktionen</h2>
+        
+        <h3 style="color: #90caf9;">bewege_mit_kollision(obj, dx, dy)</h3>
+        <p>Bewegt ein Objekt mit automatischer Kollisionsbehandlung.</p>
+        <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
+auf_boden, kollision_x, kollision_y = bewege_mit_kollision(spieler, dx, dy)</pre>
+        
+        <h3 style="color: #90caf9;">drücke_objekte(obj, dx, dy)</h3>
+        <p>Drückt andere Objekte weg wenn sich dieses Objekt bewegt.</p>
+        <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
+drücke_objekte(plattform, dx, dy)</pre>
+        
+        <h3 style="color: #90caf9;">fixiere_y_position(obj, y)</h3>
+        <p>Fixiert die Y-Position eines Objekts (wird nach jedem Update zurückgesetzt).</p>
+        <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
+fixiere_y_position(plattform, plattform.y)</pre>
         
         <h2 style="color: #4a9eff;">Debug-Funktionen</h2>
         
-        <h3 style="color: #90caf9;">print_debug(text)</h3>
+        <h3 style="color: #90caf9;">drucke_debug(text)</h3>
         <p>Gibt Debug-Text aus (erscheint in Editor-Console).</p>
         <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
-print_debug("Spieler-Position: " + str(player.x))</pre>
+drucke_debug("Spieler-Position: " + str(spieler.x))</pre>
         
         <h2 style="color: #4a9eff;">Beispiel-Code</h2>
         
         <h3 style="color: #90caf9;">Einfache Bewegung</h3>
         <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
+spieler = hole_objekt("player")
+
+definiere aktualisiere():
+    # Bewegung mit Pfeiltasten
+    wenn taste_gedrückt("RECHTS") oder taste_gedrückt("D"):
+        spieler.x += 4
+    
+    wenn taste_gedrückt("LINKS") oder taste_gedrückt("A"):
+        spieler.x -= 4
+    
+    # Kollision prüfen
+    wenn spieler.kollidiert_mit("enemy1"):
+        drucke_debug("Kollision!")
+        spieler.zerstöre()</pre>
+        
+        <h3 style="color: #90caf9;">Bewegung mit Schwerkraft und Boden-Kollision</h3>
+        <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
+bär = hole_objekt("object_15")
+
+# Geschwindigkeit
+geschwindigkeit = 3
+schwerkraft = 0.5
+geschwindigkeit_y = 0
+auf_boden = falsch
+
+definiere aktualisiere():
+    global geschwindigkeit_y, auf_boden
+    
+    # Horizontal-Bewegung
+    dx = 0
+    wenn taste_gedrückt("LINKS"):
+        dx = -geschwindigkeit
+    wenn taste_gedrückt("RECHTS"):
+        dx = geschwindigkeit
+    
+    # Schwerkraft
+    wenn nicht auf_boden:
+        geschwindigkeit_y += schwerkraft
+    
+    # Bewegung mit automatischer Kollisionsbehandlung
+    auf_boden, kollision_x, kollision_y = bewege_mit_kollision(bär, dx, geschwindigkeit_y)
+    
+    # Wenn auf Boden, Geschwindigkeit zurücksetzen
+    wenn auf_boden:
+        geschwindigkeit_y = 0
+    
+    # Sprung
+    wenn taste_runter("SPACE") und auf_boden:
+        geschwindigkeit_y = -10
+        auf_boden = falsch</pre>
+        
+        <h3 style="color: #90caf9;">Bewegliche Plattform</h3>
+        <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
+plattform = hole_objekt("object_13")
+
+plattform_geschwindigkeit = 2
+plattform_richtung = 1
+plattform_start_x = 672
+plattform_end_x = 800
+
+definiere aktualisiere():
+    global plattform_richtung
+    
+    # Bewegung hin und her
+    dx = plattform_geschwindigkeit * plattform_richtung
+    dy = 0
+    
+    auf_boden, kollision_x, kollision_y = bewege_mit_kollision(plattform, dx, dy)
+    
+    # Andere Objekte wegdrücken
+    wenn dx != 0:
+        drücke_objekte(plattform, dx, dy)
+    
+    # Umkehren wenn am Ende oder bei Kollision
+    wenn plattform.x >= plattform_end_x oder kollision_x:
+        plattform_richtung = -1
+    sonst_wenn plattform.x <= plattform_start_x oder kollision_x:
+        plattform_richtung = 1</pre>
+        """
+        return help_html
+    
+    def _generate_help_text_english(self) -> str:
+        """Generiert den Hilfe-Text mit englischen Befehlen"""
+        help_html = """
+        <h2 style="color: #4a9eff; margin-top: 0;">Object Functions</h2>
+        
+        <h3 style="color: #90caf9;">get_object(id)</h3>
+        <p>Returns an object by its ID.</p>
+        <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
+player = get_object("player")</pre>
+        
+        <h3 style="color: #90caf9;">get_all_objects()</h3>
+        <p>Returns all visible objects.</p>
+        <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
+all_objects = get_all_objects()</pre>
+        
+        <h2 style="color: #4a9eff;">Input Functions</h2>
+        
+        <h3 style="color: #90caf9;">key_pressed(key)</h3>
+        <p>Checks if a key is being held down.</p>
+        <p><b>Available keys:</b> "LEFT", "RIGHT", "UP", "DOWN", "SPACE", "ENTER", "W", "A", "S", "D", "F1"</p>
+        <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
+if key_pressed("RIGHT") or key_pressed("D"):
+    player.x += 4</pre>
+        
+        <h3 style="color: #90caf9;">key_down(key)</h3>
+        <p>Checks if a key was just pressed (only once when pressed).</p>
+        <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
+if key_down("SPACE"):
+    print_debug("Jumping!")</pre>
+        
+        <h3 style="color: #90caf9;">mouse_position()</h3>
+        <p>Returns the current mouse position (x, y).</p>
+        <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
+mx, my = mouse_position()</pre>
+        
+        <h2 style="color: #4a9eff;">GameObject Properties</h2>
+        
+        <p>Every object has the following properties:</p>
+        <ul style="color: #d4d4d4;">
+            <li><b>id</b> - Unique ID of the object</li>
+            <li><b>x, y</b> - Position (float)</li>
+            <li><b>width, height</b> - Size (float)</li>
+            <li><b>visible</b> - Visibility (bool)</li>
+            <li><b>sprite</b> - Sprite path (string)</li>
+            <li><b>is_ground</b> - Ground tile (bool) - True if object is marked as ground</li>
+        </ul>
+        
+        <h2 style="color: #4a9eff;">GameObject Methods</h2>
+        
+        <h3 style="color: #90caf9;">collides_with(other_id)</h3>
+        <p>Checks if this object collides with another.</p>
+        <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
+if player.collides_with("enemy1"):
+    print_debug("Collision!")</pre>
+        
+        <h3 style="color: #90caf9;">destroy()</h3>
+        <p>Removes the object from the game.</p>
+        <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
+enemy.destroy()</pre>
+        
+        <h2 style="color: #4a9eff;">Movement Functions</h2>
+        
+        <h3 style="color: #90caf9;">move_with_collision(obj, dx, dy)</h3>
+        <p>Moves an object with automatic collision handling.</p>
+        <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
+on_ground, collision_x, collision_y = move_with_collision(player, dx, dy)</pre>
+        
+        <h3 style="color: #90caf9;">push_objects(obj, dx, dy)</h3>
+        <p>Pushes other objects away when this object moves.</p>
+        <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
+push_objects(platform, dx, dy)</pre>
+        
+        <h3 style="color: #90caf9;">lock_y_position(obj, y)</h3>
+        <p>Locks the Y position of an object (reset after each update).</p>
+        <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
+lock_y_position(platform, platform.y)</pre>
+        
+        <h2 style="color: #4a9eff;">Debug Functions</h2>
+        
+        <h3 style="color: #90caf9;">print_debug(text)</h3>
+        <p>Outputs debug text (appears in editor console).</p>
+        <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
+print_debug("Player position: " + str(player.x))</pre>
+        
+        <h2 style="color: #4a9eff;">Example Code</h2>
+        
+        <h3 style="color: #90caf9;">Simple Movement</h3>
+        <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
 player = get_object("player")
 
 def update():
-    # Bewegung mit Pfeiltasten
+    # Movement with arrow keys
     if key_pressed("RIGHT") or key_pressed("D"):
         player.x += 4
     
     if key_pressed("LEFT") or key_pressed("A"):
         player.x -= 4
     
-    # Kollision prüfen
+    # Check collision
     if player.collides_with("enemy1"):
-        print_debug("Kollision!")
+        print_debug("Collision!")
         player.destroy()</pre>
         
-        <h3 style="color: #90caf9;">Bewegung mit Schwerkraft und Boden-Kollision</h3>
+        <h3 style="color: #90caf9;">Movement with Gravity and Ground Collision</h3>
         <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
 bear = get_object("object_15")
 
-# Geschwindigkeit
+# Speed
 speed = 3
 gravity = 0.5
 velocity_y = 0
@@ -1024,30 +1292,30 @@ on_ground = False
 def update():
     global velocity_y, on_ground
     
-    # Horizontal-Bewegung
+    # Horizontal movement
     dx = 0
     if key_pressed("LEFT"):
         dx = -speed
     if key_pressed("RIGHT"):
         dx = speed
     
-    # Schwerkraft
+    # Gravity
     if not on_ground:
         velocity_y += gravity
     
-    # Bewegung mit automatischer Kollisionsbehandlung
+    # Movement with automatic collision handling
     on_ground, collision_x, collision_y = move_with_collision(bear, dx, velocity_y)
     
-    # Wenn auf Boden, Geschwindigkeit zurücksetzen
+    # Reset velocity when on ground
     if on_ground:
         velocity_y = 0
     
-    # Sprung
+    # Jump
     if key_down("SPACE") and on_ground:
         velocity_y = -10
         on_ground = False</pre>
         
-        <h3 style="color: #90caf9;">Bewegliche Plattform</h3>
+        <h3 style="color: #90caf9;">Moving Platform</h3>
         <pre style="background-color: #1e1e1e; padding: 10px; border-radius: 3px; color: #d4d4d4;">
 platform = get_object("object_13")
 
@@ -1059,13 +1327,20 @@ platform_end_x = 800
 def update():
     global platform_direction
     
-    # Bewegung hin und her
-    platform.x += platform_speed * platform_direction
+    # Movement back and forth
+    dx = platform_speed * platform_direction
+    dy = 0
     
-    # Umkehren wenn am Ende
-    if platform.x >= platform_end_x:
+    on_ground, collision_x, collision_y = move_with_collision(platform, dx, dy)
+    
+    # Push other objects
+    if dx != 0:
+        push_objects(platform, dx, dy)
+    
+    # Reverse when at end or on collision
+    if platform.x >= platform_end_x or collision_x:
         platform_direction = -1
-    elif platform.x <= platform_start_x:
+    elif platform.x <= platform_start_x or collision_x:
         platform_direction = 1</pre>
         """
         return help_html
@@ -1098,6 +1373,7 @@ def update():
                 code = self.editor.text()
             else:
                 code = self.editor.toPlainText()
+            
             
             with open(code_file, 'w', encoding='utf-8') as f:
                 f.write(code)
@@ -1185,6 +1461,254 @@ def update():
                 text = self.editor.toPlainText()
             self.editor.apply_syntax_highlighting(text)
     
+    def _load_language_setting(self):
+        """Lädt Sprach-Einstellung - wenn nicht gespeichert, erkennt sie automatisch aus dem Code"""
+        if not self.project_path:
+            return
+        
+        settings_file = self.project_path / "code_editor_settings.json"
+        try:
+            if settings_file.exists():
+                with open(settings_file, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                    saved_language = settings.get("code_language")
+                    if saved_language:
+                        self.code_language = saved_language
+                    else:
+                        # Keine gespeicherte Sprache - automatisch erkennen
+                        self.code_language = self._auto_detect_language_from_project()
+            else:
+                # Keine Einstellungsdatei - automatisch erkennen
+                self.code_language = self._auto_detect_language_from_project()
+            
+            # Dropdown aktualisieren (ohne Signal, damit keine Übersetzung ausgelöst wird)
+            if self.language_combo:
+                self.language_combo.blockSignals(True)
+                for i in range(self.language_combo.count()):
+                    if self.language_combo.itemData(i) == self.code_language:
+                        self.language_combo.setCurrentIndex(i)
+                        break
+                self.language_combo.blockSignals(False)
+        except Exception as e:
+            print(f"Fehler beim Laden der Sprache: {e}")
+            self.code_language = "deutsch"  # Fallback
+    
+    def _auto_detect_language_from_project(self) -> str:
+        """Erkennt die Sprache automatisch aus game.py oder den Objekt-Codes"""
+        if not self.project_path:
+            return "deutsch"
+        
+        try:
+            from game_editor.engine.german_code_translator import detect_code_language
+            
+            # Prüfe zuerst game.py
+            game_code_file = self.project_path / "code" / "game.py"
+            if game_code_file.exists():
+                with open(game_code_file, 'r', encoding='utf-8') as f:
+                    code = f.read()
+                if code and code.strip():
+                    return detect_code_language(code)
+            
+            # Falls game.py leer/nicht vorhanden, prüfe Objekt-Codes
+            import json
+            project_file = self.project_path / "project.json"
+            if project_file.exists():
+                with open(project_file, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                
+                start_scene = config.get("start_scene", "level1")
+                scene_file = self.project_path / "scenes" / f"{start_scene}.json"
+                
+                if scene_file.exists():
+                    with open(scene_file, 'r', encoding='utf-8') as f:
+                        scene_data = json.load(f)
+                    
+                    objects = scene_data.get("objects", [])
+                    for obj in objects:
+                        obj_code = obj.get("code", "")
+                        if obj_code and obj_code.strip():
+                            detected = detect_code_language(obj_code)
+                            # Wenn eine eindeutige Sprache gefunden wird, verwende sie
+                            if detected != "deutsch":  # Englisch gefunden
+                                return detected
+                            # Sonst weiter suchen
+                    # Wenn alle deutsch sind oder leer, ist es Deutsch
+                    return "deutsch"
+        except Exception:
+            pass
+        
+        return "deutsch"  # Standard
+    
+    def _translate_all_codes(self, from_language: str, to_language: str) -> bool:
+        """Übersetzt ALLE Codes (game.py + alle Objekte) von einer Sprache zur anderen"""
+        if not self.project_path:
+            return False
+        
+        try:
+            from game_editor.engine.german_code_translator import translate_code_reverse, translate_code
+            import json
+            
+            success = True
+            error_messages = []
+            
+            # 1. game.py übersetzen
+            game_code_file = self.project_path / "code" / "game.py"
+            if game_code_file.exists():
+                try:
+                    with open(game_code_file, 'r', encoding='utf-8') as f:
+                        code = f.read()
+                    
+                    if code and code.strip():
+                        translated_code = code
+                        error_msg = ""
+                        
+                        if from_language == "deutsch" and to_language == "englisch":
+                            translated_code, _, _ = translate_code(code, validate_language=False, expected_language="deutsch")
+                        elif from_language == "englisch" and to_language == "deutsch":
+                            translated_code, trans_success, error_msg = translate_code_reverse(code, "deutsch")
+                            if not trans_success:
+                                success = False
+                                error_messages.append(f"game.py: {error_msg}")
+                        
+                        if success:
+                            with open(game_code_file, 'w', encoding='utf-8') as f:
+                                f.write(translated_code)
+                            
+                            # Wenn aktuell game.py im Editor ist, aktualisieren
+                            if not self.current_object_id:
+                                if hasattr(self.editor, 'setText'):
+                                    self.editor.setText(translated_code)
+                                else:
+                                    self.editor.setPlainText(translated_code)
+                                self.editor.apply_syntax_highlighting(translated_code)
+                except Exception as e:
+                    error_messages.append(f"game.py: {str(e)}")
+                    success = False
+            
+            # 2. Alle Objekt-Codes übersetzen
+            project_file = self.project_path / "project.json"
+            if project_file.exists():
+                try:
+                    with open(project_file, 'r', encoding='utf-8') as f:
+                        config = json.load(f)
+                    
+                    start_scene = config.get("start_scene", "level1")
+                    scene_file = self.project_path / "scenes" / f"{start_scene}.json"
+                    
+                    if scene_file.exists():
+                        with open(scene_file, 'r', encoding='utf-8') as f:
+                            scene_data = json.load(f)
+                        
+                        objects = scene_data.get("objects", [])
+                        for obj in objects:
+                            obj_id = obj.get("id")
+                            obj_code = obj.get("code", "")
+                            
+                            if obj_code and obj_code.strip():
+                                translated_code = obj_code
+                                error_msg = ""
+                                
+                                if from_language == "deutsch" and to_language == "englisch":
+                                    translated_code, _, _ = translate_code(obj_code, validate_language=False, expected_language="deutsch")
+                                elif from_language == "englisch" and to_language == "deutsch":
+                                    translated_code, trans_success, error_msg = translate_code_reverse(obj_code, "deutsch")
+                                    if not trans_success:
+                                        error_messages.append(f"Objekt {obj_id}: {error_msg}")
+                                        success = False
+                                        continue
+                                
+                                # Code im Objekt aktualisieren
+                                obj["code"] = translated_code
+                                
+                                # Wenn aktuell dieses Objekt im Editor ist, aktualisieren
+                                if self.current_object_id == obj_id:
+                                    if hasattr(self.editor, 'setText'):
+                                        self.editor.setText(translated_code)
+                                    else:
+                                        self.editor.setPlainText(translated_code)
+                                    self.editor.apply_syntax_highlighting(translated_code)
+                        
+                        # Szene speichern
+                        if success:
+                            with open(scene_file, 'w', encoding='utf-8') as f:
+                                json.dump(scene_data, f, indent=2, ensure_ascii=False)
+                            
+                            # Auch self.objects in scene_canvas aktualisieren
+                            if self.scene_canvas:
+                                for obj in self.scene_canvas.objects:
+                                    obj_id = obj.get("id")
+                                    # Finde entsprechende Übersetzung
+                                    for updated_obj in objects:
+                                        if updated_obj.get("id") == obj_id:
+                                            obj["code"] = updated_obj.get("code", "")
+                                            break
+                except Exception as e:
+                    error_messages.append(f"Szene: {str(e)}")
+                    success = False
+            
+            # Fehlermeldungen ausgeben
+            if error_messages:
+                if self.console:
+                    self.console.ensure_visible()
+                    self.console.append_error(f"FEHLER bei Übersetzung einiger Codes:")
+                    for msg in error_messages:
+                        self.console.append_error(f"  - {msg}")
+            
+            return success
+        except Exception as e:
+            if self.console:
+                self.console.ensure_visible()
+                self.console.append_error(f"FEHLER beim Übersetzen aller Codes: {str(e)}")
+            return False
+    
+    def _on_language_changed(self, index: int):
+        """Wird aufgerufen wenn Sprache geändert wird - übersetzt ALLE Codes"""
+        if not self.language_combo or not self.project_path:
+            return
+        
+        new_language = self.language_combo.itemData(index)
+        
+        # Wenn Sprache sich nicht geändert hat, nichts tun
+        if new_language == self.code_language:
+            return
+        
+        # ALLE Codes übersetzen (game.py + alle Objekte)
+        success = self._translate_all_codes(self.code_language, new_language)
+        
+        if success:
+            # Sprache speichern
+            self.code_language = new_language
+            self._save_language_setting()
+        else:
+            # Übersetzung fehlgeschlagen - Dropdown zurücksetzen
+            if self.language_combo:
+                self.language_combo.blockSignals(True)
+                for i in range(self.language_combo.count()):
+                    if self.language_combo.itemData(i) == self.code_language:
+                        self.language_combo.setCurrentIndex(i)
+                        break
+                self.language_combo.blockSignals(False)
+    
+    def _save_language_setting(self):
+        """Speichert Sprach-Einstellung"""
+        if not self.project_path:
+            return
+        
+        settings_file = self.project_path / "code_editor_settings.json"
+        try:
+            if settings_file.exists():
+                with open(settings_file, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+            else:
+                settings = {}
+            
+            settings["code_language"] = self.code_language
+            
+            with open(settings_file, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"Fehler beim Speichern der Sprache: {e}")
+    
     def _load_editor_settings(self):
         """Lädt Editor-Einstellungen beim Start"""
         if not self.project_path:
@@ -1224,6 +1748,8 @@ def update():
                 
                 # Einstellungen anwenden
                 self._apply_settings(preset)
+                
+                # Sprache wurde bereits in _load_language_setting() geladen
             except Exception as e:
                 print(f"Fehler beim Laden der Editor-Einstellungen: {e}")
     

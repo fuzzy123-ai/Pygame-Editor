@@ -16,6 +16,7 @@ _locked_y_positions: Dict[str, float] = {}  # Für lock_y_position - speichert f
 
 # Key-Mapping: String -> Pygame Key Code (einmalig erstellt, für bessere Performance)
 _KEY_MAP = {
+    # Englische Tasten-Namen
     "LEFT": pygame.K_LEFT,
     "RIGHT": pygame.K_RIGHT,
     "UP": pygame.K_UP,
@@ -27,6 +28,13 @@ _KEY_MAP = {
     "S": pygame.K_s,
     "D": pygame.K_d,
     "F1": pygame.K_F1,
+    # Deutsche Tasten-Namen (Aliase)
+    "LINKS": pygame.K_LEFT,
+    "RECHTS": pygame.K_RIGHT,
+    "HOCH": pygame.K_UP,
+    "RUNTER": pygame.K_DOWN,
+    "LEERTASTE": pygame.K_SPACE,
+    "EINGABE": pygame.K_RETURN,
 }
 
 
@@ -92,7 +100,8 @@ def key_pressed(key: str) -> bool:
     Prüft ob eine Taste gedrückt gehalten wird
     
     Args:
-        key: Tastenname ("LEFT", "RIGHT", "UP", "DOWN", "SPACE", "W", "A", "S", "D", "ENTER")
+        key: Tastenname ("LEFT"/"LINKS", "RIGHT"/"RECHTS", "UP"/"HOCH", "DOWN"/"RUNTER", 
+                         "SPACE"/"LEERTASTE", "W", "A", "S", "D", "ENTER"/"EINGABE")
         
     Returns:
         True wenn Taste gedrückt, sonst False
@@ -117,7 +126,8 @@ def key_down(key: str) -> bool:
     Prüft ob eine Taste gerade gedrückt wurde (einmalig beim Drücken)
     
     Args:
-        key: Tastenname ("LEFT", "RIGHT", "UP", "DOWN", "SPACE", "W", "A", "S", "D", "ENTER")
+        key: Tastenname ("LEFT"/"LINKS", "RIGHT"/"RECHTS", "UP"/"HOCH", "DOWN"/"RUNTER", 
+                         "SPACE"/"LEERTASTE", "W", "A", "S", "D", "ENTER"/"EINGABE")
         
     Returns:
         True nur beim ersten Frame nach Drücken, sonst False
@@ -507,3 +517,167 @@ def apply_locked_y_positions():
         obj = get_object(obj_id)
         if obj:
             obj.y = locked_y
+
+
+# ============================================================================
+# Deutsche Funktions-Aliase (Phase 1)
+# ============================================================================
+
+def hole_objekt(obj_id: str) -> Optional[GameObject]:
+    """
+    Deutsche Version von get_object()
+    
+    Gibt ein Objekt anhand seiner ID zurück
+    
+    Args:
+        obj_id: ID des Objekts
+        
+    Returns:
+        GameObject oder None wenn nicht gefunden
+    """
+    return get_object(obj_id)
+
+
+def hole_alle_objekte() -> List[GameObject]:
+    """
+    Deutsche Version von get_all_objects()
+    
+    Gibt alle sichtbaren Objekte zurück
+    
+    Returns:
+        Liste aller sichtbaren GameObjects
+    """
+    return get_all_objects()
+
+
+def taste_gedrückt(taste: str) -> bool:
+    """
+    Deutsche Version von key_pressed()
+    
+    Prüft ob eine Taste gedrückt gehalten wird
+    
+    Args:
+        taste: Tastenname ("LEFT", "RIGHT", "UP", "DOWN", "SPACE", "W", "A", "S", "D", "ENTER")
+        
+    Returns:
+        True wenn Taste gedrückt, sonst False
+    """
+    return key_pressed(taste)
+
+
+def taste_runter(taste: str) -> bool:
+    """
+    Deutsche Version von key_down()
+    
+    Prüft ob eine Taste gerade gedrückt wurde (einmalig beim Drücken)
+    
+    Args:
+        taste: Tastenname ("LEFT", "RIGHT", "UP", "DOWN", "SPACE", "W", "A", "S", "D", "ENTER")
+        
+    Returns:
+        True nur beim ersten Frame nach Drücken, sonst False
+    """
+    return key_down(taste)
+
+
+def maus_position() -> Tuple[int, int]:
+    """
+    Deutsche Version von mouse_position()
+    
+    Gibt die aktuelle Mausposition zurück
+    
+    Returns:
+        Tuple (x, y) der Mausposition
+    """
+    return mouse_position()
+
+
+def drucke_debug(text: str):
+    """
+    Deutsche Version von print_debug()
+    
+    Gibt Debug-Text aus (erscheint in Editor-Console)
+    
+    Args:
+        text: Debug-Text
+    """
+    print_debug(text)
+
+
+def erstelle_objekt(vorlage: Dict[str, Any]) -> Optional[GameObject]:
+    """
+    Deutsche Version von spawn_object()
+    
+    Erstellt ein neues Objekt aus einer Template-Vorlage
+    
+    Args:
+        vorlage: Dict mit Objekt-Eigenschaften (id, type, x, y, width, height, sprite, etc.)
+        
+    Returns:
+        Neues GameObject oder None bei Fehler
+    """
+    return spawn_object(vorlage)
+
+
+def bewege_mit_kollision(obj: GameObject, dx: float, dy: float) -> Tuple[bool, bool, bool]:
+    """
+    Deutsche Version von move_with_collision()
+    
+    Bewegt ein Objekt mit automatischer Kollisionsbehandlung
+    
+    Args:
+        obj: Das zu bewegende Objekt
+        dx: Bewegung in X-Richtung
+        dy: Bewegung in Y-Richtung
+        
+    Returns:
+        Tuple (on_ground, collision_x, collision_y)
+        - on_ground: True wenn Objekt auf Boden steht
+        - collision_x: True wenn Kollision in X-Richtung
+        - collision_y: True wenn Kollision in Y-Richtung
+    """
+    return move_with_collision(obj, dx, dy)
+
+
+def drücke_objekte(obj: GameObject, dx: float, dy: float, drück_stärke: float = 1.0) -> int:
+    """
+    Deutsche Version von push_objects()
+    
+    Drückt andere Objekte weg, wenn dieses Objekt mit ihnen kollidiert
+    
+    Args:
+        obj: Das Objekt, das andere wegdrücken soll
+        dx: Bewegungsrichtung in X (wird verwendet um Push-Richtung zu bestimmen)
+        dy: Bewegungsrichtung in Y (wird verwendet um Push-Richtung zu bestimmen)
+        drück_stärke: Stärke des Pushs (Standard: 1.0 = vollständige Bewegung)
+        
+    Returns:
+        Anzahl der Objekte, die weggedrückt wurden
+    """
+    return push_objects(obj, dx, dy, drück_stärke)
+
+
+def fixiere_y_position(obj: GameObject, y: float):
+    """
+    Deutsche Version von lock_y_position()
+    
+    Fixiert die Y-Position eines Objekts.
+    Die Y-Position wird nach jedem Update automatisch auf diesen Wert zurückgesetzt.
+    
+    Args:
+        obj: Das Objekt, dessen Y-Position fixiert werden soll
+        y: Die Y-Position, die beibehalten werden soll
+    """
+    lock_y_position(obj, y)
+
+
+def entferne_y_fixierung(obj: GameObject):
+    """
+    Deutsche Version von unlock_y_position()
+    
+    Entfernt die Y-Position-Fixierung eines Objekts.
+    
+    Args:
+        obj: Das Objekt, dessen Y-Position-Fixierung entfernt werden soll
+    """
+    unlock_y_position(obj)

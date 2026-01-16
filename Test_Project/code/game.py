@@ -1,28 +1,33 @@
-platform = get_object("object_13")
+bär = hole_objekt("object_15")
 
-platform_speed = 2
-platform_direction = -1
-platform_start_x = 672
-platform_end_x = 800
+# Geschwindigkeit
+geschwindigkeit = 3
+schwerkraft = 0.5
+geschwindigkeit_y = 0
+auf_boden = falsch
 
-# Y-Position fixieren (wird automatisch nach jedem Update zurückgesetzt)
-lock_y_position(platform, platform.y)
-
-def update():
-    global platform_direction
+funktion aktualisiere():
+    global geschwindigkeit_y, auf_boden
     
-    # Bewegung hin und her mit Kollisionsbehandlung
-    dx = platform_speed * platform_direction
-    dy = 0
+    # Horizontal-Bewegung
+    dx = 0
+    wenn taste_gedrückt("LINKS"):
+        dx = -geschwindigkeit
+    wenn taste_gedrückt("RECHTS"):
+        dx = geschwindigkeit
     
-    on_ground, collision_x, collision_y = move_with_collision(platform, dx, dy)
+    # Schwerkraft
+    wenn nicht auf_boden:
+        geschwindigkeit_y += schwerkraft
     
-    # Andere Objekte wegdrücken
-    if dx != 0:
-        push_objects(platform, dx, dy)
+    # Bewegung mit automatischer Kollisionsbehandlung
+    auf_boden, kollision_x, kollision_y = bewege_mit_kollision(bär, dx, geschwindigkeit_y)
     
-    # Umkehren wenn am Ende oder bei Kollision
-    if platform.x >= platform_end_x or collision_x:
-        platform_direction = -1
-    elif platform.x <= platform_start_x or collision_x:
-        platform_direction = 1
+    # Wenn auf Boden, Geschwindigkeit zurücksetzen
+    wenn auf_boden:
+        geschwindigkeit_y = 0
+    
+    # Sprung - taste_gedrückt für kontinuierliches Springen
+    wenn taste_gedrückt("SPACE") und auf_boden:
+        geschwindigkeit_y = -10
+        auf_boden = falsch

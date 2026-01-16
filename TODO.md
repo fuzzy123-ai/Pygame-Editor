@@ -6,7 +6,60 @@ Sortiert nach Aufwand (einfach → komplex) mit Randfällen und Testing-Bedarf.
 
 ## 🔴 Einfach (1-2 Tage)
 
-### 0. Hotkey-System und Tooltips
+### 0. Template-Vereinfachung: Code-Templates zentralisieren
+**Aufwand:** Niedrig  
+**Priorität:** Mittel  
+**Datum:** 2025
+
+#### Beschreibung
+Die 3 Code-Templates (Template-Datei, Fallback game.py, Standard Objekt-Code) sollen in eine zentrale Template-Funktion zusammengeführt werden, um Duplikation zu vermeiden und Wartung zu vereinfachen.
+
+**Aktuelle Situation:**
+- Template 1: `templates/empty_project/code/game.py` (wird beim Erstellen neuer Projekte kopiert)
+- Template 2: Hardcoded in `code_editor.py` Zeile 559-571 (Fallback wenn game.py fehlt)
+- Template 3: Hardcoded in `code_editor.py` Zeile 632-640 (Standard Objekt-Code)
+
+**Problem:**
+- ❌ Duplikation zwischen Template 1 und 2
+- ❌ 3 Stellen müssen aktualisiert werden
+- ❌ Für deutsche API: 3 Stellen müssen übersetzt werden
+
+#### Technische Details
+- **Dateien:** 
+  - `game_editor/utils/code_templates.py` (neu) - Zentrale Template-Funktionen
+  - `game_editor/ui/code_editor.py` - Verwendet Template-Funktionen
+  - `game_editor/ui/main_window.py` - Kann Template-Funktion beim Kopieren verwenden
+- **Änderungen:**
+  - **Neue Datei:** `code_templates.py` mit Funktionen:
+    - `get_default_game_code() -> str` - Standard-Code für game.py
+    - `get_default_object_code(object_id: str) -> str` - Standard-Code für Objekte
+    - `get_template_game_code() -> Optional[str]` - Lädt Template-Datei (optional)
+  - **In code_editor.py:**
+    - Zeile 559-571: `default_code = get_default_game_code()` verwenden
+    - Zeile 632-640: `code = get_default_object_code(object_id)` verwenden
+  - **Optional:** Template 1 wird beim Kopieren aus Funktion generiert (konsistent)
+
+#### Randfälle
+- ✅ Template-Datei existiert nicht → Fallback auf Funktion
+- ✅ Objekt-ID ist None → Standard-ID verwenden
+- ✅ Encoding-Probleme → UTF-8 sicherstellen
+- ✅ Template 1 kann weiterhin als Datei existieren (wird kopiert)
+
+#### Testing
+- [ ] Template-Funktion gibt korrekten Code zurück
+- [ ] Fallback game.py verwendet Template-Funktion
+- [ ] Standard Objekt-Code verwendet Template-Funktion
+- [ ] Template 1 wird korrekt kopiert (oder generiert)
+- [ ] Alle 3 Templates sind konsistent
+- [ ] UTF-8 Encoding funktioniert
+
+#### Referenzen
+- 📄 Siehe: `TEMPLATE_ERKLAERUNG.md` - Detaillierte Erklärung aller 3 Templates
+- 📄 Siehe: `TEMPLATE_VEREINFACHUNG.md` - Vollständige Analyse und Implementierungs-Plan
+
+---
+
+### 1. Hotkey-System und Tooltips
 **Aufwand:** Niedrig  
 **Priorität:** Hoch  
 **Datum:** 2024
@@ -114,7 +167,7 @@ Vollständiges Hotkey-System für alle Editor-Funktionen mit Tooltips die auf Ho
 
 ---
 
-### 1. Debug-Ansicht ergänzen: Auge-Button
+### 2. Debug-Ansicht ergänzen: Auge-Button
 **Aufwand:** Niedrig  
 **Priorität:** Hoch  
 **Datum:** 2024
@@ -158,7 +211,7 @@ Wenn der Auge-Button (Debug-Toggle) gedrückt wird, sollen alle Debug-Elemente a
 
 ---
 
-### 1.5. Fullscreen-Modus für Spiel
+### 2.5. Fullscreen-Modus für Spiel
 **Aufwand:** Mittel  
 **Priorität:** Mittel  
 **Datum:** 2024
@@ -226,7 +279,7 @@ Fullscreen-Modus für das Spiel mit Alt+Enter zum Umschalten zwischen Fullscreen
 
 ---
 
-### 1.6. Editor-Einstellungen Persistenz
+### 2.6. Editor-Einstellungen Persistenz
 **Aufwand:** Niedrig  
 **Priorität:** Mittel  
 **Datum:** 2024
@@ -303,6 +356,63 @@ Editor-Einstellungen sollen über Neustart hinweg gespeichert werden, damit die 
 
 ---
 
+### 2.7. Ingame-Uhr System (Zeit-basierte Bewegung)
+**Aufwand:** Mittel  
+**Priorität:** Hoch  
+**Datum:** 2025
+
+#### Beschreibung
+Zentrale Zeit-Verwaltung als Standard-Richtwert für alle Systeme:
+- **Bewegung:** Zeit-basiert statt Frame-basiert (Pixel/Sekunde statt Pixel/Frame)
+- **Pausen/Timer:** Zeit-basierte Wartezeiten
+- **Animationen:** Zeit-basierte Frame-Rate (später)
+- **Physik:** Zeit-basierte Geschwindigkeiten
+- **Anzeige:** FPS, Delta-Zeit, absolute Zeit im Debug-Overlay
+
+**Problem aktuell:**
+- ❌ Bewegung ist Frame-basiert (hängt von FPS ab)
+- ❌ Bei niedriger FPS läuft Spiel langsamer
+- ❌ Bei hoher FPS läuft Spiel schneller
+- ❌ Nicht konsistent auf verschiedenen Systemen
+
+**Lösung:**
+- ✅ Delta-Zeit berechnen (Zeit seit letztem Frame)
+- ✅ Zeit-basierte Bewegung (Pixel/Sekunde statt Pixel/Frame)
+- ✅ Zeit-API für Schüler-Code (`get_delta_time()`, `get_total_time()`, `get_fps()`)
+- ✅ Debug-Overlay erweitern (FPS, Delta-Zeit, Gesamt-Zeit)
+
+#### Technische Details
+- **Dateien:** 
+  - `game_editor/engine/runtime.py` - Zeit-Berechnung im Game Loop
+  - `game_editor/engine/api.py` - Zeit-Funktionen für Schüler-Code
+  - `game_editor/engine/collision.py` - Zeit-basierte Bewegung (optional)
+- **Änderungen:**
+  - **Runtime:** Zeit-Variablen (`delta_time`, `total_time`, `fps`) berechnen
+  - **API:** Zeit-Funktionen (`get_delta_time()`, `get_total_time()`, `get_fps()`) hinzufügen
+  - **Bewegung:** `move_with_collision()` erweitern mit Delta-Zeit-Support
+  - **Debug-Overlay:** Delta-Zeit und Gesamt-Zeit anzeigen
+  - **Namespace:** Zeit-Funktionen in `game_namespace` und `obj_namespace` einfügen
+
+#### Randfälle
+- ✅ Delta-Zeit-Begrenzung: Maximal 0.1 Sekunden (verhindert Sprünge bei niedriger FPS)
+- ✅ Rückwärtskompatibilität: Alte Code funktioniert weiterhin (`use_delta_time=False`)
+- ✅ Performance: Minimaler Overhead (nur 3 Berechnungen pro Frame)
+- ✅ FPS-Variation: Bewegung bleibt konsistent bei verschiedenen FPS
+
+#### Testing
+- [ ] Delta-Zeit wird korrekt berechnet
+- [ ] Zeit-basierte Bewegung funktioniert (konsistent bei verschiedenen FPS)
+- [ ] Zeit-Funktionen sind im Schüler-Code verfügbar
+- [ ] Debug-Overlay zeigt FPS, Delta-Zeit, Gesamt-Zeit
+- [ ] Rückwärtskompatibilität: Alte Code funktioniert weiterhin
+- [ ] Performance-Test: Keine Verzögerung durch Zeit-Berechnung
+- [ ] Delta-Zeit-Begrenzung funktioniert (verhindert Sprünge)
+
+#### Referenzen
+- 📄 Siehe: `INGAME_UHR_PLAN.md` - Vollständige Planung mit allen Systemen, Integrationen und Beispielen
+
+---
+
 ## 🟡 Mittel (2-3 Tage)
 
 ### 2. Asset Browser: Mehrspalten-Layout
@@ -341,7 +451,7 @@ Asset Browser soll mehrere Spalten nebeneinander anzeigen können:
 
 ---
 
-### 3. Asset Browser: Ordner-System
+### 4. Asset Browser: Ordner-System
 **Aufwand:** Mittel  
 **Priorität:** Mittel  
 **Datum:** 2024
@@ -417,7 +527,7 @@ Beim Platzieren von Objekten soll durch **Drücken und Ziehen** mehrere Objekte 
 
 ---
 
-### 5. Layer-System erweitern
+### 6. Layer-System erweitern
 **Aufwand:** Mittel-Hoch  
 **Priorität:** Hoch  
 **Datum:** 2024
@@ -482,7 +592,7 @@ Layer-System mit mehreren Ebenen erweitern (basiert auf aktuellem System).
 
 ## 🔴 Hoch (5-7 Tage)
 
-### 6. Interaktive Blöcke (Super Mario Style)
+### 7. Interaktive Blöcke (Super Mario Style)
 **Aufwand:** Hoch  
 **Priorität:** Mittel  
 **Datum:** 2024
@@ -521,7 +631,7 @@ Blöcke die von unten getroffen werden können:
 
 ---
 
-### 7. Sound-System über Editor
+### 8. Sound-System über Editor
 **Aufwand:** Hoch  
 **Priorität:** Mittel  
 **Datum:** 2024
@@ -564,7 +674,7 @@ Sound-System vollständig über Editor integrieren:
 
 ## 🔴 Sehr Hoch (7-10 Tage)
 
-### 8. Animation-System
+### 9. Animation-System
 **Aufwand:** Sehr Hoch  
 **Priorität:** Hoch  
 **Datum:** 2024
@@ -625,27 +735,103 @@ Vollständiges Animation-System:
 
 | Aufgabe | Aufwand | Priorität | Status |
 |---------|---------|-----------|--------|
-| 0. Hotkey-System und Tooltips | 🔴 Einfach | Hoch | Pending |
-| 1. Debug-Ansicht ergänzen | 🔴 Einfach | Hoch | Pending |
-| 2. Asset Browser: Mehrspalten | 🟡 Mittel | Mittel | Pending |
-| 3. Asset Browser: Ordner | 🟡 Mittel | Mittel | Pending |
-| 4. Editor: Multi-Platzierung | 🟠 Mittel-Hoch | Mittel | Pending |
-| 5. Layer-System erweitern | 🟠 Mittel-Hoch | Hoch | Pending |
-| 6. Interaktive Blöcke | 🔴 Hoch | Mittel | Pending |
-| 7. Sound-System | 🔴 Hoch | Mittel | Pending |
-| 8. Animation-System | 🔴 Sehr Hoch | Hoch | Pending |
+| 0. Template-Vereinfachung | 🔴 Einfach | Mittel | Pending |
+| 1. Hotkey-System und Tooltips | 🔴 Einfach | Hoch | Pending |
+| 2. Debug-Ansicht ergänzen | 🔴 Einfach | Hoch | Pending |
+| 2.7. Ingame-Uhr System | 🟡 Mittel | Hoch | Pending |
+| 3. Asset Browser: Mehrspalten | 🟡 Mittel | Mittel | Pending |
+| 4. Asset Browser: Ordner | 🟡 Mittel | Mittel | Pending |
+| 5. Editor: Multi-Platzierung | 🟠 Mittel-Hoch | Mittel | Pending |
+| 6. Layer-System erweitern | 🟠 Mittel-Hoch | Hoch | Pending |
+| 7. Interaktive Blöcke | 🔴 Hoch | Mittel | Pending |
+| 8. Sound-System | 🔴 Hoch | Mittel | Pending |
+| 9. Animation-System | 🔴 Sehr Hoch | Hoch | Pending |
+| 10. Level-Editor mit pytmx | 🔴 Sehr Hoch | Niedrig | Pending |
 
 **Empfohlene Reihenfolge:**
-1. **Hotkey-System** (schnell, hoher Impact, verbessert Workflow erheblich)
-2. Debug-Ansicht (schnell, hoher Impact)
-3. **Editor-Einstellungen Persistenz** (gute UX, relativ einfach, sollte früh kommen)
-4. **Fullscreen-Modus** (gute UX, relativ einfach)
-5. Asset Browser Verbesserungen (2+3 zusammen)
-6. Layer-System (wichtig für Level-Design)
-7. Multi-Platzierung (QOL-Feature)
-8. Interaktive Blöcke (Gameplay-Feature)
-9. Sound-System (Immersion)
-10. Animation-System (komplex, aber wichtig)
+1. **Template-Vereinfachung** (schnell, vereinfacht Wartung, Vorbereitung für deutsche API)
+2. **Hotkey-System** (schnell, hoher Impact, verbessert Workflow erheblich)
+3. Debug-Ansicht (schnell, hoher Impact)
+4. **Ingame-Uhr System** (wichtig als Basis für Bewegung, Animationen, Physik - hohe Priorität)
+5. **Editor-Einstellungen Persistenz** (gute UX, relativ einfach, sollte früh kommen)
+6. **Fullscreen-Modus** (gute UX, relativ einfach)
+7. Asset Browser Verbesserungen (3+4 zusammen)
+8. Layer-System (wichtig für Level-Design)
+9. Multi-Platzierung (QOL-Feature)
+10. Interaktive Blöcke (Gameplay-Feature)
+11. Sound-System (Immersion)
+12. Animation-System (komplex, aber wichtig - profitiert von Uhr-System)
+
+---
+
+## 🔵 Niedrige Priorität / Zukünftige Optionen
+
+### 9. Level-Editor mit pytmx (Tiled Map Editor Integration)
+**Aufwand:** Sehr Hoch (7-10+ Tage)  
+**Priorität:** Niedrig  
+**Datum:** 2024
+
+#### Beschreibung
+Optionaler Level-Editor mit pytmx für Tiled Map Editor TMX-Dateien:
+- **Tiled Map Editor Integration:** Level können in Tiled erstellt und im Editor geladen werden
+- **TMX-Format:** Unterstützung für Tile-Layers, Object-Layers, Properties
+- **Dual-Mode:** Editor kann sowohl JSON (aktuell) als auch TMX (optional) verwenden
+- **Konvertierung:** Möglichkeit JSON ↔ TMX zu konvertieren
+
+#### Technische Details
+- **Dependencies:** `pytmx` (Python 3.9+, pygame-CE kompatibel)
+- **Dateien:** 
+  - `game_editor/engine/tmx_loader.py` (neu) - TMX-Loader
+  - `game_editor/ui/level_editor.py` (neu) - Level-Editor UI
+  - `game_editor/engine/loader.py` - Erweitern für TMX-Support
+- **Änderungen:**
+  - **Format-Konvertierung:** JSON → TMX und TMX → JSON
+  - **Loader-Erweiterung:** Automatische Format-Erkennung (.json vs .tmx)
+  - **Tiled-Integration:** Export/Import von Tiled-Maps
+  - **Tile-Layer-Support:** Tile-Layers werden zu GameObject-Arrays konvertiert
+  - **Object-Layer-Support:** Tiled-Objects werden zu GameObjects konvertiert
+  - **Properties-Mapping:** Tiled-Properties → GameObject-Attribute
+
+#### Vorteile
+- ✅ Professionelle Tilemap-Erstellung mit Tiled
+- ✅ Große Level effizienter erstellen
+- ✅ Tileset-Management in Tiled
+- ✅ Automatische Kollisionsboxen aus Tiled
+
+#### Nachteile / Herausforderungen
+- ⚠️ **Format-Inkompatibilität:** Aktuelles System nutzt JSON, nicht TMX
+- ⚠️ **Doppelte Workflows:** Schüler müssen Tiled lernen (zusätzlich zum Editor)
+- ⚠️ **Großer Refactoring-Aufwand:** Loader, Scene Canvas, Inspector müssen erweitert werden
+- ⚠️ **Editor-Integration:** Visueller Editor arbeitet mit JSON, nicht mit Tiled
+- ⚠️ **Zielgruppe:** Für Klassen 7-10 möglicherweise zu komplex
+
+#### Empfehlung
+**Nur implementieren wenn:**
+- Tiled Map Editor Teil des Lehrplans ist
+- Große, komplexe Level benötigt werden
+- Professionelle Tilemap-Features gewünscht sind
+- Zeit für umfangreiches Refactoring vorhanden ist
+
+**Alternative:** Eigenes Tilemap-System im Editor entwickeln (weniger Features, aber besser integriert)
+
+#### Randfälle
+- ✅ JSON ↔ TMX Konvertierung → Datenverlust vermeiden
+- ✅ Tiled-Properties → GameObject-Attribute Mapping
+- ✅ Tile-Layers → GameObject-Arrays
+- ✅ Object-Layers → GameObjects
+- ✅ Tileset-Management → Asset Browser Integration
+- ✅ Kollisionsboxen aus Tiled → GameObject Colliders
+- ✅ Bestehende JSON-Projekte → Migration zu TMX (optional)
+
+#### Testing
+- [ ] TMX-Dateien werden korrekt geladen
+- [ ] JSON ↔ TMX Konvertierung funktioniert ohne Datenverlust
+- [ ] Tile-Layers werden zu GameObjects konvertiert
+- [ ] Object-Layers werden zu GameObjects konvertiert
+- [ ] Properties werden korrekt gemappt
+- [ ] Bestehende JSON-Projekte funktionieren weiterhin
+- [ ] Editor kann beide Formate verarbeiten
+- [ ] Tiled-Export/Import funktioniert
 
 ---
 

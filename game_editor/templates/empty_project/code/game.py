@@ -1,22 +1,22 @@
 # game.py - Dein Spiel-Code
 # Hier schreibst du die Logik für dein Spiel
 
-player = get_object("player")
+spieler = hole_objekt("player")
 
-def update():
+definiere aktualisiere():
     # Bewegung mit Pfeiltasten
-    if key_pressed("RIGHT") or key_pressed("D"):
-        player.x += 4
+    wenn taste_gedrückt("RECHTS") oder taste_gedrückt("D"):
+        spieler.x += 4
     
-    if key_pressed("LEFT") or key_pressed("A"):
-        player.x -= 4
+    wenn taste_gedrückt("LINKS") oder taste_gedrückt("A"):
+        spieler.x -= 4
     
-    if key_pressed("UP") or key_pressed("W"):
-        player.y -= 4
+    wenn taste_gedrückt("HOCH") oder taste_gedrückt("W"):
+        spieler.y -= 4
     
-    if key_pressed("DOWN") or key_pressed("S"):
-        player.y += 4
+    wenn taste_gedrückt("RUNTER") oder taste_gedrückt("S"):
+        spieler.y += 4
     
     # Kollisionserkennung
-    if player.collides_with("enemy1"):
-        print_debug("Achtung! Kollision mit Enemy!")
+    wenn spieler.kollidiert_mit("enemy1"):
+        drucke_debug("Achtung! Kollision mit Enemy!")

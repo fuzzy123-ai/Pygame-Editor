@@ -9,11 +9,16 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 from .loader import load_project, load_scene, create_objects_from_scene
 from .gameobject import GameObject
+from .german_code_translator import translate_code
 from .api import (_init_api, _update_key_states, get_debug_output, 
                   clear_debug_output, print_debug, get_object, get_all_objects,
                   key_pressed, key_down, mouse_position, spawn_object,
                   move_with_collision, push_objects, lock_y_position,
-                  unlock_y_position, apply_locked_y_positions)
+                  unlock_y_position, apply_locked_y_positions,
+                  # Deutsche Aliase
+                  hole_objekt, hole_alle_objekte, taste_gedrückt, taste_runter,
+                  maus_position, drucke_debug, erstelle_objekt, bewege_mit_kollision,
+                  drücke_objekte, fixiere_y_position, entferne_y_fixierung)
 
 # libpng Warnungen werden direkt auf stderr geschrieben, nicht als Python warnings
 # Sie werden in gameobject.py beim Laden der Bilder unterdrückt
@@ -56,22 +61,39 @@ def load_student_code(game_code_path: Path, game_objects: list[GameObject]) -> D
     
     # Namespace für Schüler-Code vorbereiten
     game_namespace = {
-        # Objekte
+        # Objekte (Englisch)
         "get_object": get_object,
         "get_all_objects": get_all_objects,
         
-        # Input
+        # Objekte (Deutsch)
+        "hole_objekt": hole_objekt,
+        "hole_alle_objekte": hole_alle_objekte,
+        
+        # Input (Englisch)
         "key_pressed": key_pressed,
         "key_down": key_down,
         "mouse_position": mouse_position,
         
-        # Utility
+        # Input (Deutsch)
+        "taste_gedrückt": taste_gedrückt,
+        "taste_runter": taste_runter,
+        "maus_position": maus_position,
+        
+        # Utility (Englisch)
         "print_debug": print_debug,
         "spawn_object": spawn_object,
         "move_with_collision": move_with_collision,
         "push_objects": push_objects,
         "lock_y_position": lock_y_position,
         "unlock_y_position": unlock_y_position,
+        
+        # Utility (Deutsch)
+        "drucke_debug": drucke_debug,
+        "erstelle_objekt": erstelle_objekt,
+        "bewege_mit_kollision": bewege_mit_kollision,
+        "drücke_objekte": drücke_objekte,
+        "fixiere_y_position": fixiere_y_position,
+        "entferne_y_fixierung": entferne_y_fixierung,
         
         # Standard-Python (für Schüler nützlich)
         "print": print,
@@ -86,19 +108,47 @@ def load_student_code(game_code_path: Path, game_objects: list[GameObject]) -> D
     }
     
     # Code laden und kompilieren
+    line_mapping = {}  # Für Fehlermeldungen
     try:
         with open(game_code_path, 'r', encoding='utf-8') as f:
             code = f.read()
         
-        # Test-Compile
-        compile(code, str(game_code_path), 'exec')
+        # Sprache prüfen: Ist Deutsch aktiviert?
+        # Prüfe code_editor_settings.json oder verwende Standard (deutsch)
+        code_language = "deutsch"  # Standard
+        try:
+            settings_file = game_code_path.parent.parent / "code_editor_settings.json"
+            if settings_file.exists():
+                with open(settings_file, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                    code_language = settings.get("code_language", "deutsch")
+        except Exception:
+            pass  # Standard verwenden
         
-        # Code ausführen
-        exec(code, game_namespace)
+        # Übersetzen nur wenn Deutsch gewählt ist
+        if code_language == "deutsch":
+            # DEUTSCH: Übersetze deutschen Code in Python (ohne Validierung in Runtime)
+            python_code, line_mapping, _ = translate_code(code, validate_language=False, expected_language="deutsch")
+        else:
+            # ENGLISCH: Code nicht übersetzen
+            python_code = code
+            num_lines = len(code.split('\n'))
+            for i in range(1, num_lines + 1):
+                line_mapping[i] = i
+        
+        # Test-Compile (mit Python-Code)
+        compile(python_code, str(game_code_path), 'exec')
+        
+        # Code ausführen (mit Python-Code)
+        exec(python_code, game_namespace)
         
     except SyntaxError as e:
         error_msg = translate_error(str(e))
-        print(f"SYNTAXFEHLER in Zeile {e.lineno}: {error_msg}")
+        # Zeile-Nummer zurückübersetzen (falls Übersetzung verwendet wurde)
+        error_line = e.lineno
+        if e.lineno and line_mapping and e.lineno in line_mapping:
+            error_line = line_mapping[e.lineno]
+        print(f"SYNTAXFEHLER in Zeile {error_line}: {error_msg}")
         print(f"Details: {e.msg}")
         raise
     
@@ -176,23 +226,63 @@ def main(project_path: str):
                 break
         
         if obj_data and obj_data.get("code"):
+            obj_line_mapping = {}  # Für Fehlermeldungen
             try:
                 # Code für dieses Objekt ausführen
+                obj_code = obj_data["code"]
+                
+                # Sprache prüfen: Ist Deutsch aktiviert?
+                # Verwende gleiche Sprache wie game.py
+                code_language = "deutsch"  # Standard
+                try:
+                    settings_file = project_dir / "code_editor_settings.json"
+                    if settings_file.exists():
+                        with open(settings_file, 'r', encoding='utf-8') as f:
+                            settings = json.load(f)
+                            code_language = settings.get("code_language", "deutsch")
+                except Exception:
+                    pass  # Standard verwenden
+                
+                # Übersetzen nur wenn Deutsch gewählt ist
+                if code_language == "deutsch":
+                    # DEUTSCH: Übersetze deutschen Code in Python (ohne Validierung in Runtime)
+                    python_obj_code, obj_line_mapping, _ = translate_code(obj_code, validate_language=False, expected_language="deutsch")
+                else:
+                    # ENGLISCH: Code nicht übersetzen
+                    python_obj_code = obj_code
+                    num_lines = len(obj_code.split('\n'))
+                    for i in range(1, num_lines + 1):
+                        obj_line_mapping[i] = i
+                
                 obj_namespace = {
-                    # Objekte
+                    # Objekte (Englisch)
                     "get_object": get_object,
                     "get_all_objects": get_all_objects,
-                    # Input
+                    # Objekte (Deutsch)
+                    "hole_objekt": hole_objekt,
+                    "hole_alle_objekte": hole_alle_objekte,
+                    # Input (Englisch)
                     "key_pressed": key_pressed,
                     "key_down": key_down,
                     "mouse_position": mouse_position,
-                    # Utility
+                    # Input (Deutsch)
+                    "taste_gedrückt": taste_gedrückt,
+                    "taste_runter": taste_runter,
+                    "maus_position": maus_position,
+                    # Utility (Englisch)
                     "print_debug": print_debug,
                     "spawn_object": spawn_object,
                     "move_with_collision": move_with_collision,
                     "push_objects": push_objects,
                     "lock_y_position": lock_y_position,
                     "unlock_y_position": unlock_y_position,
+                    # Utility (Deutsch)
+                    "drucke_debug": drucke_debug,
+                    "erstelle_objekt": erstelle_objekt,
+                    "bewege_mit_kollision": bewege_mit_kollision,
+                    "drücke_objekte": drücke_objekte,
+                    "fixiere_y_position": fixiere_y_position,
+                    "entferne_y_fixierung": entferne_y_fixierung,
                     # Standard-Python
                     "print": print,
                     "len": len,
@@ -204,9 +294,18 @@ def main(project_path: str):
                     "list": list,
                     "dict": dict,
                 }
-                # Code ausführen
-                exec(obj_data["code"], obj_namespace)
+                # Code ausführen (mit Python-Code)
+                exec(python_obj_code, obj_namespace)
                 object_namespaces[obj.id] = obj_namespace
+            except SyntaxError as e:
+                error_msg = translate_error(str(e))
+                # Zeile-Nummer zurückübersetzen (falls Übersetzung verwendet wurde)
+                error_line = e.lineno
+                if e.lineno and obj_line_mapping and e.lineno in obj_line_mapping:
+                    error_line = obj_line_mapping[e.lineno]
+                print(f"SYNTAXFEHLER in Code für Objekt {obj.id}, Zeile {error_line}: {error_msg}")
+                print(f"Details: {e.msg}")
+                # Objekt-Code wird übersprungen, aber Spiel läuft weiter
             except Exception as e:
                 error_msg = translate_error(str(e))
                 print(f"FEHLER beim Laden von Code für Objekt {obj.id}: {error_msg}")
@@ -252,26 +351,41 @@ def main(project_path: str):
         # Update-Funktionen aus allen Objekten aufrufen
         # WICHTIG: Code für alle Objekte wird ausgeführt, nicht nur für das aktuell ausgewählte
         for obj_id, obj_namespace in object_namespaces.items():
+            # Akzeptiere sowohl "update" als auch "aktualisiere"
+            update_func = None
             if "update" in obj_namespace:
+                update_func = obj_namespace["update"]
+            elif "aktualisiere" in obj_namespace:
+                update_func = obj_namespace["aktualisiere"]
+            
+            if update_func:
                 try:
-                    obj_namespace["update"]()
+                    update_func()
                 except Exception as e:
                     error_msg = translate_error(str(e))
-                    print(f"FEHLER in update() für Objekt {obj_id}: {error_msg}")
+                    print(f"FEHLER in update()/aktualisiere() für Objekt {obj_id}: {error_msg}")
                     print(f"Typ: {type(e).__name__}")
                     # Spiel pausiert nicht, läuft weiter
         
         # Schüler-Update aufrufen (code/game.py)
         # WICHTIG: Nur ausführen wenn keine Objekte eigenen Code haben, um Doppelausführung zu vermeiden
         # Wenn Objekte Code haben, wird nur deren Code ausgeführt
-        if not object_namespaces and game_namespace and "update" in game_namespace:
-            try:
-                game_namespace["update"]()
-            except Exception as e:
-                error_msg = translate_error(str(e))
-                print(f"FEHLER in update() (game.py): {error_msg}")
-                print(f"Typ: {type(e).__name__}")
-                # Spiel pausiert nicht, läuft weiter
+        if not object_namespaces and game_namespace:
+            # Akzeptiere sowohl "update" als auch "aktualisiere"
+            update_func = None
+            if "update" in game_namespace:
+                update_func = game_namespace["update"]
+            elif "aktualisiere" in game_namespace:
+                update_func = game_namespace["aktualisiere"]
+            
+            if update_func:
+                try:
+                    update_func()
+                except Exception as e:
+                    error_msg = translate_error(str(e))
+                    print(f"FEHLER in update()/aktualisiere() (game.py): {error_msg}")
+                    print(f"Typ: {type(e).__name__}")
+                    # Spiel pausiert nicht, läuft weiter
         
         # Unsichtbare Objekte entfernen (destroy())
         game_objects[:] = [obj for obj in game_objects if obj.visible]

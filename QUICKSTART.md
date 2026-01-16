@@ -50,6 +50,40 @@ python -m game_editor.editor
 
 ## Beispiel-Code
 
+### Deutsch (empfohlen für Schüler)
+
+```python
+# code/game.py
+
+spieler = hole_objekt("player")
+
+funktion aktualisiere():
+    # Bewegung mit Pfeiltasten oder WASD
+    wenn taste_gedrückt("RECHTS") oder taste_gedrückt("D"):
+        spieler.x += 4
+    
+    wenn taste_gedrückt("LINKS") oder taste_gedrückt("A"):
+        spieler.x -= 4
+    
+    wenn taste_gedrückt("HOCH") oder taste_gedrückt("W"):
+        spieler.y -= 4
+    
+    wenn taste_gedrückt("RUNTER") oder taste_gedrückt("S"):
+        spieler.y += 4
+    
+    # Kollision prüfen
+    wenn spieler.kollidiert_mit("enemy1"):
+        drucke_debug("Kollision!")
+    
+    # Bewegung mit Kollisionsbehandlung
+    # auf_boden, kollision_x, kollision_y = bewege_mit_kollision(spieler, dx, dy)
+    
+    # Andere Objekte wegdrücken
+    # gedrückt = drücke_objekte(spieler, dx, dy)
+```
+
+### Englisch (funktioniert weiterhin)
+
 ```python
 # code/game.py
 
@@ -72,12 +106,6 @@ def update():
     # Kollision prüfen
     if player.collides_with("enemy1"):
         print_debug("Kollision!")
-    
-    # Bewegung mit Kollisionsbehandlung
-    # on_ground, collision_x, collision_y = move_with_collision(player, dx, dy)
-    
-    # Andere Objekte wegdrücken
-    # pushed_count = push_objects(player, dx, dy)
 ```
 
 ## Tastatur-Shortcuts

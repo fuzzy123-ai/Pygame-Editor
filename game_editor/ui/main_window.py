@@ -352,9 +352,11 @@ class EditorMainWindow(QMainWindow):
         self.console = Console()
         # Höhe wird von der Console selbst verwaltet
         
-        # Console-Referenz an SceneCanvas übergeben
+        # Console-Referenz an SceneCanvas und CodeEditor übergeben
         if self.scene_canvas:
             self.scene_canvas.console = self.console
+        if self.code_editor:
+            self.code_editor.console = self.console
         
         # Stacked Widget für Projekt-View und Sprite-Views
         self.view_stack = QStackedWidget()
@@ -702,6 +704,103 @@ class EditorMainWindow(QMainWindow):
         self.current_sprite_tab = None
         self.view_stack.setCurrentIndex(0)  # Projekt-View
     
+    def _validate_all_codes(self) -> bool:
+        """
+        Validiert alle Codes (game.py + alle Objekt-Codes) auf Sprach-Konformität
+        
+        Returns:
+            True wenn alle Codes gültig sind, False wenn Fehler gefunden wurden
+        """
+        if not self.project_path:
+            return True
+        
+        # Sprache laden
+        code_language = "deutsch"  # Standard
+        try:
+            settings_file = self.project_path / "code_editor_settings.json"
+            if settings_file.exists():
+                import json
+                with open(settings_file, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                    code_language = settings.get("code_language", "deutsch")
+        except Exception:
+            pass
+        
+        from game_editor.engine.german_code_translator import validate_code_language
+        import json
+        
+        all_errors = []  # Liste von (datei, zeile, nachricht) Tuples
+        
+        # 1. game.py validieren
+        game_code_file = self.project_path / "code" / "game.py"
+        if game_code_file.exists():
+            try:
+                with open(game_code_file, 'r', encoding='utf-8') as f:
+                    code = f.read()
+                if code and code.strip():
+                    is_valid, error_message, error_line = validate_code_language(code, code_language)
+                    if not is_valid:
+                        all_errors.append(("game.py", error_line, error_message))
+            except Exception:
+                pass  # Fehler ignorieren
+        
+        # 2. Alle Objekt-Codes validieren
+        try:
+            project_file = self.project_path / "project.json"
+            if project_file.exists():
+                with open(project_file, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                
+                start_scene = config.get("start_scene", "level1")
+                scene_file = self.project_path / "scenes" / f"{start_scene}.json"
+                
+                if scene_file.exists():
+                    with open(scene_file, 'r', encoding='utf-8') as f:
+                        scene_data = json.load(f)
+                    
+                    objects = scene_data.get("objects", [])
+                    for obj in objects:
+                        obj_id = obj.get("id")
+                        obj_code = obj.get("code", "")
+                        if obj_code and obj_code.strip():
+                            is_valid, error_message, error_line = validate_code_language(obj_code, code_language)
+                            if not is_valid:
+                                all_errors.append((f"Objekt {obj_id}", error_line, error_message))
+        except Exception:
+            pass  # Fehler ignorieren
+        
+        # Fehler im Console ausgeben (mit Counter)
+        if all_errors:
+            # Fehler gruppieren nach Nachricht
+            error_counter = {}
+            for datei, zeile, nachricht in all_errors:
+                key = (datei, zeile, nachricht)
+                if key not in error_counter:
+                    error_counter[key] = 0
+                error_counter[key] += 1
+            
+            # Console aufklappen und Fehler ausgeben
+            self.console.ensure_visible()
+            self.console.append_error("")
+            self.console.append_error("=" * 60)
+            self.console.append_error(f"SPRACH-FEHLER: Code verwendet falsche Sprache (erwartet: {code_language})")
+            self.console.append_error("=" * 60)
+            
+            for (datei, zeile, nachricht), count in error_counter.items():
+                if count > 1:
+                    self.console.append_error(f"[{count}x] {datei}, Zeile {zeile}: {nachricht}")
+                else:
+                    self.console.append_error(f"{datei}, Zeile {zeile}: {nachricht}")
+            
+            self.console.append_error("")
+            self.console.append_error("FEHLER: Spiel kann nicht gestartet werden.")
+            self.console.append_error("Bitte korrigiere die Fehler bevor du das Spiel startest.")
+            self.console.append_error("=" * 60)
+            self.console.append_error("")
+            return False
+        
+        return True
+    
     def _run_game(self):
         """Startet das Spiel in einem separaten Prozess"""
         if not self.project_path:
@@ -710,6 +809,11 @@ class EditorMainWindow(QMainWindow):
         
         # Projekt speichern
         self._save_project()
+        
+        # Code-Validierung: Prüfe ob alle Codes die richtige Sprache verwenden
+        if not self._validate_all_codes():
+            # Validierung fehlgeschlagen - Start blockieren
+            return
         
         # TODO: Subprocess starten
         import subprocess

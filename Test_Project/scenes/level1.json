@@ -24,7 +24,7 @@
       },
       "layer": "default",
       "ground": true,
-      "code": "# Code für object_3\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_3\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
+      "code": "# Code für object_3\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = hole_objekt(\"object_3\")\n\nfunktion update():\n    # Deine Logik hier\n    überspringen\n",
       "camera": false
     },
     {
@@ -40,7 +40,7 @@
         "enabled": true,
         "type": "rect"
       },
-      "code": "# Code für object_10\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_10\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
+      "code": "# Code für object_10\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = hole_objekt(\"object_10\")\n\nfunktion update():\n    # Deine Logik hier\n    überspringen\n",
       "ground": true,
       "camera": false
     },
@@ -58,7 +58,8 @@
         "type": "rect"
       },
       "ground": false,
-      "camera": false
+      "camera": false,
+      "code": ""
     },
     {
       "id": "object_12",
@@ -74,24 +75,7 @@
         "type": "rect"
       },
       "ground": true,
-      "code": "# Code für object_12\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_12\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
-      "camera": false
-    },
-    {
-      "id": "object_18",
-      "type": "sprite",
-      "sprite": "assets/images/066.png",
-      "x": -192,
-      "y": 288,
-      "width": 96,
-      "height": 96,
-      "layer": "default",
-      "collider": {
-        "enabled": false,
-        "type": "rect"
-      },
-      "ground": false,
-      "code": "# Code für object_18\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_18\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
+      "code": "# Code für object_12\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = hole_objekt(\"object_12\")\n\nfunktion update():\n    # Deine Logik hier\n    überspringen\n",
       "camera": false
     },
     {
@@ -108,7 +92,7 @@
         "type": "rect"
       },
       "ground": true,
-      "code": "# Code für object_12\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_12\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
+      "code": "# Code für object_12\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = hole_objekt(\"object_12\")\n\nfunktion update():\n    # Deine Logik hier\n    überspringen\n",
       "name": "object_1",
       "camera": false
     },
@@ -131,7 +115,7 @@
       },
       "ground": true,
       "name": "wall",
-      "code": "# Code für object_8\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_8\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
+      "code": "# Code für object_8\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = hole_objekt(\"object_8\")\n\nfunktion update():\n    # Deine Logik hier\n    überspringen\n",
       "camera": false
     },
     {
@@ -139,7 +123,7 @@
       "type": "sprite",
       "sprite": "assets/images/a_wall.png",
       "x": 480,
-      "y": 384,
+      "y": 288,
       "width": 96,
       "height": 96,
       "layer": "default",
@@ -153,7 +137,7 @@
       },
       "ground": true,
       "name": "wall_1",
-      "code": "# Code für object_11\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_11\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
+      "code": "# Code für object_11\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = hole_objekt(\"object_11\")\n\nfunktion update():\n    # Deine Logik hier\n    überspringen\n",
       "camera": false
     },
     {
@@ -174,7 +158,7 @@
         "height": 34
       },
       "ground": false,
-      "code": "platform = get_object(\"object_13\")\n\nplatform_speed = 2\nplatform_direction = -1\nplatform_start_x = 672\nplatform_end_x = 800\n\n# Y-Position fixieren (wird automatisch nach jedem Update zurückgesetzt)\nlock_y_position(platform, platform.y)\n\ndef update():\n    global platform_direction\n    \n    # Bewegung hin und her mit Kollisionsbehandlung\n    dx = platform_speed * platform_direction\n    dy = 0\n    \n    on_ground, collision_x, collision_y = move_with_collision(platform, dx, dy)\n    \n    # Andere Objekte wegdrücken\n    if dx != 0:\n        push_objects(platform, dx, dy)\n    \n    # Umkehren wenn am Ende oder bei Kollision\n    if platform.x >= platform_end_x or collision_x:\n        platform_direction = -1\n    elif platform.x <= platform_start_x or collision_x:\n        platform_direction = 1",
+      "code": "platform = hole_objekt(\"object_13\")\n\nplatform_speed = 2\nplatform_direction = -1\nplatform_start_x = 672\nplatform_end_x = 800\n\n# Y-Position fixieren (wird automatisch nach jedem Update zurückgesetzt)\nfixiere_y_position(platform, platform.y)\n\nfunktion update():\n    global platform_direction\n    \n    # Bewegung hin und her mit Kollisionsbehandlung\n    dx = platform_speed * platform_direction\n    dy = 0\n    \n    on_ground, collision_x, collision_y = bewege_mit_kollision(platform, dx, dy)\n    \n    # Andere Objekte wegdrücken\n    wenn dx != 0:\n        drücke_objekte(platform, dx, dy)\n    \n    # Umkehren wenn am Ende oder bei Kollision\n    wenn platform.x >= platform_end_x oder collision_x:\n        platform_direction = -1\n    sonst_wenn platform.x <= platform_start_x oder collision_x:\n        platform_direction = 1",
       "camera": false
     },
     {
@@ -195,30 +179,8 @@
         "height": 66
       },
       "ground": false,
-      "code": "bear = get_object(\"object_15\")\n\n# Geschwindigkeit\nspeed = 3\ngravity = 0.5\nvelocity_y = 0\non_ground = False\n\ndef update():\n    global velocity_y, on_ground\n    \n    # Horizontal-Bewegung\n    dx = 0\n    if key_pressed(\"LEFT\"):\n        dx = -speed\n    if key_pressed(\"RIGHT\"):\n        dx = speed\n    \n    # Schwerkraft\n    if not on_ground:\n        velocity_y += gravity\n    \n    # Bewegung mit automatischer Kollisionsbehandlung\n    on_ground, collision_x, collision_y = move_with_collision(bear, dx, velocity_y)\n    \n    # Wenn auf Boden, Geschwindigkeit zurücksetzen\n    if on_ground:\n        velocity_y = 0\n    \n    # Sprung - key_pressed für kontinuierliches Springen\n    if key_pressed(\"SPACE\") and on_ground:\n        velocity_y = -10\n        on_ground = False ",
+      "code": "bär = hole_objekt(\"object_15\")\n\n# Geschwindigkeit\ngeschwindigkeit = 3\nschwerkraft = 0.5\ngeschwindigkeit_y = 0\nauf_boden = falsch\n\nfunktion aktualisiere():\n    global geschwindigkeit_y, auf_boden\n    \n    # Horizontal-Bewegung\n    dx = 0\n    wenn taste_gedrückt(\"LINKS\"):\n        dx = -geschwindigkeit\n    wenn taste_gedrückt(\"RECHTS\"):\n        dx = geschwindigkeit\n    \n    # Schwerkraft\n    wenn nicht auf_boden:\n        geschwindigkeit_y += schwerkraft\n    \n    # Bewegung mit automatischer Kollisionsbehandlung\n    auf_boden, kollision_x, kollision_y = bewege_mit_kollision(bär, dx, geschwindigkeit_y)\n    \n    # Wenn auf Boden, Geschwindigkeit zurücksetzen\n    wenn auf_boden:\n        geschwindigkeit_y = 0\n    \n    # Sprung - taste_gedrückt für kontinuierliches Springen\n    wenn taste_gedrückt(\"SPACE\") und auf_boden:\n        geschwindigkeit_y = -10\n        auf_boden = falsch",
       "camera": true
-    },
-    {
-      "id": "object_23",
-      "type": "sprite",
-      "sprite": "assets/images/a_wall.png",
-      "x": 576,
-      "y": 384,
-      "width": 96,
-      "height": 96,
-      "layer": "default",
-      "collider": {
-        "enabled": false,
-        "type": "rect",
-        "offset_x": 0,
-        "offset_y": 0,
-        "width": 96,
-        "height": 96
-      },
-      "ground": true,
-      "name": "wall_2",
-      "code": "# Code für object_8\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_8\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
-      "camera": false
     },
     {
       "id": "object_24",
@@ -239,7 +201,7 @@
       },
       "ground": true,
       "name": "wall_1_1",
-      "code": "# Code für object_11\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_11\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
+      "code": "# Code für object_11\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = hole_objekt(\"object_11\")\n\nfunktion update():\n    # Deine Logik hier\n    überspringen\n",
       "camera": false
     },
     {
@@ -261,7 +223,7 @@
       },
       "ground": true,
       "name": "wall_3",
-      "code": "# Code für object_8\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_8\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
+      "code": "# Code für object_8\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = hole_objekt(\"object_8\")\n\nfunktion update():\n    # Deine Logik hier\n    überspringen\n",
       "camera": false
     },
     {
@@ -283,7 +245,7 @@
       },
       "ground": true,
       "name": "wall_4",
-      "code": "# Code für object_8\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_8\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
+      "code": "# Code für object_8\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = hole_objekt(\"object_8\")\n\nfunktion update():\n    # Deine Logik hier\n    überspringen\n",
       "camera": false
     },
     {
@@ -301,8 +263,74 @@
       },
       "ground": true,
       "name": "wall_4_1",
-      "code": "# Code für object_8\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = get_object(\"object_8\")\n\ndef update():\n    # Deine Logik hier\n    pass\n",
+      "code": "# Code für object_8\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = hole_objekt(\"object_8\")\n\nfunktion update():\n    # Deine Logik hier\n    überspringen\n",
       "camera": false
+    },
+    {
+      "id": "object_4",
+      "type": "sprite",
+      "sprite": "assets/images/009.png",
+      "x": -96,
+      "y": 384,
+      "width": 96,
+      "height": 96,
+      "layer": "default",
+      "collider": {
+        "enabled": true,
+        "type": "rect",
+        "offset_x": 0,
+        "offset_y": 25,
+        "width": 96,
+        "height": 34
+      },
+      "ground": false,
+      "code": "platform = hole_objekt(\"object_4\")\n\nplatform_speed = 2\nplatform_direction = -1\nplatform_start_x = 672\nplatform_end_x = 800\n\n# Y-Position fixieren (wird automatisch nach jedem Update zurückgesetzt)\nfixiere_y_position(platform, platform.y)\n\nfunktion update():\n    global platform_direction\n    \n    # Bewegung hin und her mit Kollisionsbehandlung\n    dx = platform_speed * platform_direction\n    dy = 0\n    \n    on_ground, collision_x, collision_y = bewege_mit_kollision(platform, dx, dy)\n    \n    # Andere Objekte wegdrücken\n    wenn dx != 0:\n        drücke_objekte(platform, dx, dy)\n    \n    # Umkehren wenn am Ende oder bei Kollision\n    wenn platform.x >= platform_end_x oder collision_x:\n        platform_direction = -1\n    sonst_wenn platform.x <= platform_start_x oder collision_x:\n        platform_direction = 1",
+      "camera": false,
+      "name": "object_2_1"
+    },
+    {
+      "id": "object_5",
+      "type": "sprite",
+      "sprite": "assets/images/a_wall.png",
+      "x": 480,
+      "y": 384,
+      "width": 96,
+      "height": 96,
+      "layer": "default",
+      "collider": {
+        "enabled": false,
+        "type": "rect",
+        "offset_x": 0,
+        "offset_y": 0,
+        "width": 96,
+        "height": 96
+      },
+      "ground": true,
+      "name": "wall_5",
+      "code": "# Code für object_8\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = hole_objekt(\"object_8\")\n\nfunktion update():\n    # Deine Logik hier\n    überspringen\n",
+      "camera": false
+    },
+    {
+      "type": "sprite",
+      "sprite": "assets/images/a_wall.png",
+      "x": 576,
+      "y": 384,
+      "width": 96,
+      "height": 96,
+      "layer": "default",
+      "collider": {
+        "enabled": false,
+        "type": "rect",
+        "offset_x": 0,
+        "offset_y": 0,
+        "width": 96,
+        "height": 96
+      },
+      "ground": true,
+      "name": "wall_5_1",
+      "code": "# Code für object_8\n# Hier schreibst du die Logik für dieses Objekt\n\nobj = hole_objekt(\"object_8\")\n\nfunktion update():\n    # Deine Logik hier\n    überspringen\n",
+      "camera": false,
+      "id": "object_6"
     }
   ]
 }

@@ -90,13 +90,36 @@ mein_spiel/
 
 ## 🎮 Schüler-API
 
+**WICHTIG:** Alle Code kann auf Deutsch geschrieben werden! Beide Varianten (Deutsch + Englisch) funktionieren.
+
 ### Objekte
+
+**Deutsch:**
+```python
+spieler = hole_objekt("player")           # Objekt nach ID holen
+alle_objekte = hole_alle_objekte()        # Alle Objekte
+```
+
+**Englisch (funktioniert weiterhin):**
 ```python
 player = get_object("player")        # Objekt nach ID holen
 all_objects = get_all_objects()      # Alle Objekte
 ```
 
 ### Input
+
+**Deutsch:**
+```python
+wenn taste_gedrückt("RECHTS"):       # Taste gedrückt halten
+    spieler.x += 4
+
+wenn taste_runter("LEERTASTE"):      # Taste einmalig drücken
+    springe()
+
+maus_x, maus_y = maus_position()     # Mausposition
+```
+
+**Englisch:**
 ```python
 if key_pressed("RIGHT"):             # Taste gedrückt halten
     player.x += 4
@@ -108,6 +131,23 @@ mouse_x, mouse_y = mouse_position()  # Mausposition
 ```
 
 ### GameObject-Eigenschaften
+
+**Deutsch:**
+```python
+spieler.x = 100                       # Position X
+spieler.y = 200                       # Position Y
+spieler.width = 32                    # Breite
+spieler.height = 48                   # Höhe
+spieler.visible = wahr                # Sichtbarkeit
+spieler.sprite = "path"               # Sprite-Pfad
+
+wenn spieler.kollidiert_mit("enemy1"):  # Kollision prüfen
+    drucke_debug("Kollision!")
+
+spieler.zerstöre()                    # Objekt entfernen
+```
+
+**Englisch:**
 ```python
 player.x = 100           # Position X
 player.y = 200           # Position Y
@@ -117,12 +157,27 @@ player.visible = True    # Sichtbarkeit
 player.sprite = "path"   # Sprite-Pfad
 
 if player.collides_with("enemy1"):  # Kollision prüfen
-    print("Kollision!")
+    print_debug("Kollision!")
 
 player.destroy()         # Objekt entfernen
 ```
 
 ### Bewegung & Kollision
+
+**Deutsch:**
+```python
+# Bewegung mit automatischer Kollisionsbehandlung
+auf_boden, kollision_x, kollision_y = bewege_mit_kollision(obj, dx, dy)
+# auf_boden: wahr wenn Objekt auf Boden/Plattform steht
+# kollision_x: wahr wenn Kollision in X-Richtung
+# kollision_y: wahr wenn Kollision in Y-Richtung
+
+# Andere Objekte wegdrücken
+gedrückt = drücke_objekte(obj, dx, dy, drück_stärke=1.0)
+# drückt andere Objekte in Bewegungsrichtung weg
+```
+
+**Englisch:**
 ```python
 # Bewegung mit automatischer Kollisionsbehandlung
 on_ground, collision_x, collision_y = move_with_collision(obj, dx, dy)
@@ -133,6 +188,46 @@ on_ground, collision_x, collision_y = move_with_collision(obj, dx, dy)
 # Andere Objekte wegdrücken
 pushed_count = push_objects(obj, dx, dy, push_strength=1.0)
 # drückt andere Objekte in Bewegungsrichtung weg
+```
+
+### Code auf Deutsch schreiben
+
+**Alle Schlüsselwörter können auf Deutsch sein:**
+```python
+# Deutsch → Python
+funktion → def
+wenn → if
+sonst → else
+für → for
+während → while
+gib_zurück → return
+überspringen → pass
+wahr → True
+falsch → False
+keine → None
+und → and
+oder → or
+nicht → not
+# ... und mehr!
+```
+
+**Beispiel:**
+```python
+spieler = hole_objekt("player")
+geschwindigkeit = 3
+
+funktion aktualisiere():
+    global geschwindigkeit
+    
+    dx = 0
+    wenn taste_gedrückt("RECHTS"):
+        dx = geschwindigkeit
+    
+    auf_boden, kollision_x, kollision_y = bewege_mit_kollision(spieler, dx, 0)
+    
+    wenn auf_boden:
+        drucke_debug("Auf Boden!")
+```
 # push_strength: Stärke des Pushs (Standard: 1.0)
 # gibt Anzahl der weggedrückten Objekte zurück
 ```

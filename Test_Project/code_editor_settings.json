@@ -1,0 +1,19 @@
+{
+  "current_preset": "default",
+  "custom_presets": {
+    "meins": {
+      "font_size": 11,
+      "default": "#00ff00",
+      "comment": "#00aa00",
+      "number": "#00ff88",
+      "string": "#88ff00",
+      "keyword": "#00ff00",
+      "class": "#00ff88",
+      "function": "#88ff00",
+      "variable": "#00ff00",
+      "operator": "#00ffff",
+      "background": "#000000"
+    }
+  },
+  "code_language": "deutsch"
+}

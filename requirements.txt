@@ -11,6 +11,9 @@ Pillow>=10.0.0  # Für Bildgrößen-Prüfung beim Sortieren
 # Editor GUI
 PySide6>=6.5.0
 
-# QScintilla (optional, aber empfohlen für Syntax-Highlighting)
-# Falls nicht verfügbar: pip install PySide6-QScintilla
-# oder manuell: https://www.riverbankcomputing.com/software/qscintilla/download
+# LSP (Language Server Protocol) für Code-Editor
+python-lsp-server>=1.9.0  # LSP-Server für Python
+
+# Bildverarbeitung (iCCP-Profil-Korrektur)
+# Pillow wird bereits oben verwendet - keine zusätzliche Abhängigkeit nötig
+# Optional: Wand>=0.6.13 für ImageMagick-Fallback (benötigt ImageMagick als System-Bibliothek)

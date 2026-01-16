@@ -4,6 +4,7 @@ GameObject - Repräsentiert ein Objekt im Spiel
 from pathlib import Path
 from typing import Optional, Dict, Any
 import pygame
+from ..utils.image_fixer import fix_iccp_profile
 
 
 class GameObject:
@@ -56,23 +57,12 @@ class GameObject:
             if sprite_full_path.exists():
                 try:
                     # libpng Warnungen unterdrücken (iCCP: known incorrect sRGB profile)
-                    # Diese Warnungen werden direkt auf stderr geschrieben, nicht als Python warnings
-                    import sys
-                    import os
-                    import io
-                    from contextlib import redirect_stderr
+                    # iCCP-Profil-Korrektur für PNG-Bilder (behebt libpng-Warnung dauerhaft)
+                    if sprite_full_path.suffix.lower() == '.png':
+                        fix_iccp_profile(sprite_full_path, backup=False)
                     
-                    # Temporär stderr umleiten, um libpng Warnungen zu filtern
-                    # Verwende os.devnull für bessere Kompatibilität
-                    original_stderr = sys.stderr
-                    try:
-                        # Versuche stderr auf devnull umzuleiten
-                        with open(os.devnull, 'w', encoding='utf-8') as devnull:
-                            sys.stderr = devnull
-                            self._sprite_surface = pygame.image.load(str(sprite_full_path)).convert_alpha()
-                    finally:
-                        # stderr wiederherstellen
-                        sys.stderr = original_stderr
+                    # Sprite laden (nach iCCP-Korrektur sollte keine Warnung mehr erscheinen)
+                    self._sprite_surface = pygame.image.load(str(sprite_full_path)).convert_alpha()
                     # Immer auf die Projekteinstellungs-Größe skalieren
                     target_size = int(sprite_size)
                     if self._sprite_surface.get_width() != target_size or \
@@ -195,6 +185,26 @@ class GameObject:
         """Markiert das Objekt zum Entfernen"""
         self.visible = False
         # Objekt wird in der nächsten Update-Phase aus der Liste entfernt
+    
+    def kollidiert_mit(self, andere_id: str) -> bool:
+        """
+        Deutsche Version von collides_with()
+        
+        Prüft ob dieses Objekt mit einem anderen kollidiert
+        
+        Args:
+            andere_id: ID des anderen Objekts
+            
+        Returns:
+            True wenn Kollision, sonst False
+        """
+        return self.collides_with(andere_id)
+    
+    def zerstöre(self):
+        """Deutsche Version von destroy()
+        
+        Markiert das Objekt zum Entfernen"""
+        self.destroy()
     
     def draw(self, screen: pygame.Surface, debug: bool = False, offset_x: float = 0, offset_y: float = 0):
         """Zeichnet das Objekt auf den Screen

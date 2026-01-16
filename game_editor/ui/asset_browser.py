@@ -12,6 +12,7 @@ import shutil
 from typing import Dict
 from ..utils.sprite_organizer import SpriteOrganizer
 from ..utils.spritesheet_extractor import SpritesheetExtractor
+from ..utils.image_fixer import fix_iccp_profile
 from .spritesheet_dialog import SpritesheetDialog
 from .asset_grid_widget import AssetGridWidget
 from .project_settings_dialog import ProjectSettingsDialog
@@ -598,6 +599,7 @@ class AssetBrowser(QWidget):
             print(f"[Asset Browser] {failed_count} Bild(er) konnten nicht importiert werden")
     
     def _import_single_image(self, source_path: Path) -> bool:
+        """Importiert ein einzelnes Bild und behebt iCCP-Profil-Probleme"""
         """Importiert ein einzelnes Bild - gibt True zurück bei Erfolg"""
         
         # Prüfen ob es ein Spritesheet ist (größer als eingestellte Sprite-Größe)
@@ -663,6 +665,11 @@ class AssetBrowser(QWidget):
         
         try:
             shutil.copy2(source_path, dest_path)
+            
+            # iCCP-Profil-Korrektur für PNG-Bilder (behebt libpng-Warnung dauerhaft)
+            if dest_path.suffix.lower() == '.png':
+                fix_iccp_profile(dest_path, backup=False)
+            
             # Importiertes Asset highlighten
             self._select_asset(str(dest_path))
             return True
@@ -825,6 +832,11 @@ class AssetBrowser(QWidget):
                 
                 try:
                     shutil.copy2(img_file, dest_path)
+                    
+                    # iCCP-Profil-Korrektur für PNG-Bilder
+                    if dest_path.suffix.lower() == '.png':
+                        fix_iccp_profile(dest_path, backup=False)
+                    
                     processed_count += 1
                     print(f"[Asset Browser] Bild automatisch importiert: {img_file.name}")
                 except Exception as e:
@@ -899,6 +911,11 @@ class AssetBrowser(QWidget):
                 
                 try:
                     shutil.copy2(source_path, dest_path)
+                    
+                    # iCCP-Profil-Korrektur für PNG-Bilder
+                    if dest_path.suffix.lower() == '.png':
+                        fix_iccp_profile(dest_path, backup=False)
+                    
                     imported_count += 1
                     last_imported_path = dest_path
                 except Exception as e:
